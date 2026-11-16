@@ -1,0 +1,29 @@
+# Kaggle 2xT4: kaggle_t_aug.yaml on person crops. Each clip is cropped to the union of its own YOLO11s-pose person
+# boxes (+15%, cli.extract with feat_pose.yaml first), square 288x288 input -> ~1.5x the pixels on hands, watch and
+# notes versus the full 640x360 frame squeezed into 224x384. Uses only the clip itself, so test clips stay independent.
+name: convnext_t_crop
+paths:
+  data_dir: /kaggle/input/data-slayer-4
+  cache_dir: /tmp/cache
+  output_dir: /kaggle/working/outputs
+data:
+  num_frames: 8
+  img_size: [288, 288]
+  clips_per_video: 16
+  num_workers: 4
+  crop_scale: [0.7, 1.0]
+  speed_jitter: 0.2
+  grayscale: 0.1
+  person_crop: 1.15
+model:
+  backbone: convnext_tiny.fb_in22k
+  drop_path: 0.2
+train:
+  folds: [0, 1, 2, 3, 4]
+  epochs: 12
+  batch_size: 8
+  lr: 3.0e-4
+  backbone_lr: 3.0e-5
+  optimizer: adamw
+  ema: 0.998
+  patience: 4

@@ -1,0 +1,26 @@
+# Kaggle 2xT4: base.yaml (ConvNeXt-T clip model) plus the anti-overfit recipe, to measure it against the plain
+# baseline at equal cost: speed jitter (subject tempo), grayscale (HDR front vs SDR side), drop_path 0.2, EMA weights.
+name: convnext_t_aug
+paths:
+  data_dir: /kaggle/input/data-slayer-4
+  cache_dir: /tmp/cache
+  output_dir: /kaggle/working/outputs
+data:
+  num_frames: 8
+  img_size: [224, 384]
+  clips_per_video: 16
+  num_workers: 4
+  speed_jitter: 0.2
+  grayscale: 0.1
+model:
+  backbone: convnext_tiny.fb_in22k
+  drop_path: 0.2
+train:
+  folds: [0, 1, 2, 3, 4]
+  epochs: 12
+  batch_size: 8
+  lr: 3.0e-4
+  backbone_lr: 3.0e-5
+  optimizer: adamw
+  ema: 0.998
+  patience: 4

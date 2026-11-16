@@ -1,0 +1,18 @@
+# Laptop (RTX 3050 4GB) run of the base.yaml recipe: same folds, frames, size, schedule and effective batch
+# (2 clips x grad_accum 8 = 16 = Kaggle 8/GPU x 2 GPUs). Choose the backbone/name with --set for ablations.
+name: laptop_convnext_t_t8
+data:
+  num_frames: 8
+  img_size: [224, 384]
+  clips_per_video: 16
+  num_workers: 4
+model:
+  backbone: convnext_tiny.fb_in22k
+train:
+  folds: [0, 1]
+  epochs: 12
+  batch_size: 2
+  grad_accum: 8
+  lr: 3.0e-4
+  backbone_lr: 3.0e-5
+  optimizer: adamw

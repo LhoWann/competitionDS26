@@ -1,0 +1,31 @@
+# environments and tools
+.venv/
+.agents/
+.claude/
+CLAUDE.md
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+
+# competition data, caches, results and weights (never commit: FAQ 16, size)
+data/
+cache/
+outputs/
+kaggle_upload/
+*.pt
+*.pth
+*.safetensors
+*.npy
+*.zip
+*.tgz
+
+# credentials and personal documents
+secrets/
+kaggle.json
+.env
+pendaftaran/
+
+# scratch space
+agent_space/

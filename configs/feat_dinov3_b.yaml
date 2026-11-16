@@ -1,0 +1,21 @@
+# Laptop Phase 1: frozen DINOv3 ViT-B frame features (cli.extract) + small temporal head on the same 5 subject folds.
+# Features live in memory, so data loading stays in the main process (num_workers 0).
+name: feat_dinov3_vitb
+data:
+  num_workers: 0
+features:
+  backbone: vit_base_patch16_dinov3.lvd1689m
+  img_size: [224, 384]
+  stride: 2
+  pool: cls_mean
+model:
+  kind: features
+  hidden: 256
+  dropout: 0.3
+train:
+  folds: [0, 1, 2, 3, 4]
+  epochs: 30
+  batch_size: 64
+  lr: 5.0e-4
+  patience: 8
+  mixed_precision: "no"

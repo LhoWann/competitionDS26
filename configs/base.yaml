@@ -1,0 +1,22 @@
+# Kaggle 2xT4 baseline: 5 subject-disjoint folds, ConvNeXt-T (IN-22k) frames + temporal transformer.
+# batch_size is per GPU.
+name: convnext_t_t8
+paths:
+  data_dir: /kaggle/input/data-slayer-4
+  cache_dir: /tmp/cache
+  output_dir: /kaggle/working/outputs
+data:
+  num_frames: 8
+  img_size: [224, 384]
+  clips_per_video: 16
+  num_workers: 4
+model:
+  backbone: convnext_tiny.fb_in22k
+  grad_checkpointing: false
+train:
+  folds: [0, 1, 2, 3, 4]
+  epochs: 12
+  batch_size: 8
+  lr: 3.0e-4
+  backbone_lr: 3.0e-5
+  optimizer: adamw

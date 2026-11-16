@@ -1,0 +1,16 @@
+# Laptop smoke run (RTX 3050 4GB): few subjects, small backbone, one fold, two epochs.
+name: debug
+data:
+  max_subjects: 6
+  n_folds: 3
+  num_frames: 8
+  img_size: [160, 288]
+  clips_per_video: 4
+  num_workers: 2
+model:
+  backbone: convnext_nano.in12k_ft_in1k
+train:
+  folds: [0]
+  epochs: 2
+  batch_size: 4
+  patience: 2

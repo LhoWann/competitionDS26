@@ -1,0 +1,25 @@
+# Laptop: frozen YOLO11s-pose keypoints (COCO weights, cli.extract at native 640x360) + small temporal head. Keypoints
+# are box-relative, so they carry body motion but not clothes, face or camera colour (the subject shift).
+name: feat_pose_y11s
+data:
+  num_workers: 0
+features:
+  backbone: yolo11s-pose
+  img_size: [360, 640]
+  stride: 2
+  pool: cls
+  batch_size: 32
+model:
+  kind: features
+  hidden: 128
+  dropout: 0.2
+  temporal_layers: 2
+  temporal_heads: 4
+train:
+  folds: [0, 1, 2, 3, 4]
+  epochs: 40
+  batch_size: 64
+  lr: 1.0e-3
+  patience: 10
+  ema: 0.99
+  mixed_precision: "no"
