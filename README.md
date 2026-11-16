@@ -9,7 +9,7 @@ README ini ditulis supaya orang yang baru belajar computer vision bisa mengikuti
 
 - [DS2026](#ds2026)
   - [Daftar isi](#daftar-isi)
-  - [1. Konsep dasar untuk pemula](#1-konsep-dasar-untuk-pemula)
+  - [1. Konsep dasar](#1-konsep-dasar)
   - [2. Data dan aturan lomba](#2-data-dan-aturan-lomba)
   - [3. Temuan EDA](#3-temuan-eda)
   - [4. Alur kerja (diagram)](#4-alur-kerja-diagram)
@@ -26,7 +26,7 @@ README ini ditulis supaya orang yang baru belajar computer vision bisa mengikuti
     - [Colab (A100 / L4)](#colab-a100--l4)
   - [8. Cara mengembangkan di branch baru](#8-cara-mengembangkan-di-branch-baru)
 
-## 1. Konsep dasar untuk pemula
+## 1. Konsep dasar
 
 | Istilah | Penjelasan singkat |
 |---|---|
