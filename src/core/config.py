@@ -57,6 +57,7 @@ class ModelConfig:
     temporal_heads: int = 8
     dropout: float = 0.2
     grad_checkpointing: bool = False
+    train_blocks: int = -1
 
 
 @dataclass

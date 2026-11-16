@@ -17,7 +17,13 @@ from core.config import Config
 from dataset.clips import VideoClipDataset, seed_worker
 from dataset.features import FeatureClipDataset
 from evaluation.metrics import evaluate_clips
-from models.clip_classifier import ClipClassifier, FeatureClipClassifier, VideoMAEClassifier, cheat_log_probs
+from models.clip_classifier import (
+    ClipClassifier,
+    FeatureClipClassifier,
+    VideoMAEClassifier,
+    VJEPA2Classifier,
+    cheat_log_probs,
+)
 from training.losses import clip_loss
 from training.optim import build_optimizer, cosine_schedule
 
@@ -55,12 +61,14 @@ def predictions_frame(res: dict[str, np.ndarray]) -> pd.DataFrame:
 
 
 def build_model(cfg: Config, in_dim: int = 0) -> torch.nn.Module:
-    """`model.kind=frames`: end-to-end ClipClassifier; `videomae`: VideoMAEClassifier; `features`: head over
+    """`model.kind=frames`: end-to-end ClipClassifier; `videomae` / `vjepa2`: video transformers; `features`: head over
     `in_dim`-wide cached frame vectors."""
     if cfg.model.kind == "features":
         return FeatureClipClassifier(cfg.model, in_dim, cfg.data.clip_len // cfg.features.stride)
     if cfg.model.kind == "videomae":
         return VideoMAEClassifier(cfg.model, cfg.data.num_frames, cfg.data.img_size)
+    if cfg.model.kind == "vjepa2":
+        return VJEPA2Classifier(cfg.model, cfg.data.num_frames, cfg.data.img_size)
     return ClipClassifier(cfg.model, cfg.data.num_frames, cfg.data.img_size)
 
 

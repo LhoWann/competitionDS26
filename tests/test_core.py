@@ -187,6 +187,20 @@ def test_videomae_classifier_trains_backbone():
     optimizer.step()
     assert out.shape == (2, 8) and not torch.equal(before, query)
 
+def test_vjepa2_partial_freeze():
+    cfg = tiny_cfg("model.kind=vjepa2", "data.img_size=[32,32]", "model.train_blocks=1")
+    model = build_model(cfg)
+    layers = model.backbone.encoder.layer
+    assert not any(p.requires_grad for p in layers[0].parameters())
+    assert all(p.requires_grad for p in layers[-1].parameters())
+    optimizer = build_optimizer(model, cfg.train)
+    last = layers[-1].mlp.fc1.weight
+    before = last.clone()
+    out = model(torch.randint(0, 255, (2, 4, 3, 32, 32), dtype=torch.uint8))
+    clip_loss(out, torch.tensor([0, 5]), torch.tensor([0, 1]), cfg.train).backward()
+    optimizer.step()
+    assert out.shape == (2, 8) and not torch.equal(before, last) and layers[0].mlp.fc1.weight.grad is None
+
 def test_person_box_crop(tmp_path):
     pose = np.zeros((3, POSE_DIM), np.float32)
     pose[:, -5:] = [0.2, 0.5, 0.75, 0.5, 0.9]

@@ -1,11 +1,11 @@
-"""Clip classifiers -> 8 behavior logits: end-to-end timm frame backbone, VideoMAE video transformer, or a head over
-cached frozen features."""
+"""Clip classifiers -> 8 behavior logits: end-to-end timm frame backbone, VideoMAE or V-JEPA 2 video transformer, or a
+head over cached frozen features."""
 
 
 import timm
 import torch
 from torch import nn
-from transformers import VideoMAEConfig, VideoMAEModel
+from transformers import VideoMAEConfig, VideoMAEModel, VJEPA2Config, VJEPA2ForVideoClassification
 
 from core.config import ModelConfig
 from dataset.labels import BEHAVIORS, CHEAT_IDS
@@ -53,10 +53,9 @@ class VideoMAEClassifier(nn.Module):
             self.backbone = VideoMAEModel(VideoMAEConfig(**size))
         if cfg.grad_checkpointing:
             self.backbone.gradient_checkpointing_enable()
-        self.register_buffer("mean", torch.tensor(timm.data.IMAGENET_DEFAULT_MEAN).view(1, 1, 3, 1, 1) * 255,
-                             persistent=False)
-        self.register_buffer("std", torch.tensor(timm.data.IMAGENET_DEFAULT_STD).view(1, 1, 3, 1, 1) * 255,
-                             persistent=False)
+        freeze_prefix(self.backbone.embeddings, self.backbone.encoder.layer, cfg.train_blocks)
+        self.register_buffer("mean", imagenet_stat(timm.data.IMAGENET_DEFAULT_MEAN), persistent=False)
+        self.register_buffer("std", imagenet_stat(timm.data.IMAGENET_DEFAULT_STD), persistent=False)
         dim = self.backbone.config.hidden_size
         self.norm = nn.LayerNorm(dim)
         self.head = nn.Sequential(nn.Dropout(cfg.dropout), nn.Linear(dim, len(BEHAVIORS)))
@@ -64,6 +63,45 @@ class VideoMAEClassifier(nn.Module):
     def forward(self, pixels: torch.Tensor) -> torch.Tensor:
         tokens = self.backbone(pixel_values=(pixels.float() - self.mean) / self.std).last_hidden_state
         return self.head(self.norm(tokens.mean(1)))
+
+
+class VJEPA2Classifier(nn.Module):
+    """HF V-JEPA 2 video classifier (e.g. `facebook/vjepa2-vitl-fpc16-256-ssv2`): ViT encoder (RoPE, so any T and
+    H, W divisible by the patch size) -> its pretrained attentive pooler -> new 8-way linear head. With
+    `model.train_blocks=0` the encoder stays frozen and only pooler + head learn (the paper's attentive-probe setup)."""
+
+    def __init__(self, cfg: ModelConfig, num_frames: int, img_size: list[int]) -> None:
+        super().__init__()
+        if cfg.pretrained:
+            full = VJEPA2ForVideoClassification.from_pretrained(cfg.backbone, attn_implementation="sdpa")
+        else:
+            full = VJEPA2ForVideoClassification(VJEPA2Config(crop_size=img_size[0], frames_per_clip=num_frames))
+        self.backbone = full.vjepa2
+        self.backbone.predictor = nn.Identity()
+        if cfg.grad_checkpointing:
+            self.backbone.gradient_checkpointing_enable()
+        freeze_prefix(self.backbone.encoder.embeddings, self.backbone.encoder.layer, cfg.train_blocks)
+        self.pooler = full.pooler
+        self.register_buffer("mean", imagenet_stat(timm.data.IMAGENET_DEFAULT_MEAN), persistent=False)
+        self.register_buffer("std", imagenet_stat(timm.data.IMAGENET_DEFAULT_STD), persistent=False)
+        self.head = nn.Sequential(nn.Dropout(cfg.dropout), nn.Linear(full.config.hidden_size, len(BEHAVIORS)))
+
+    def forward(self, pixels: torch.Tensor) -> torch.Tensor:
+        x = (pixels.float() - self.mean) / self.std
+        tokens = self.backbone(pixel_values_videos=x, skip_predictor=True).last_hidden_state
+        return self.head(self.pooler(tokens))
+
+
+def imagenet_stat(values: tuple[float, ...]) -> torch.Tensor:
+    return torch.tensor(values).view(1, 1, 3, 1, 1) * 255
+
+
+def freeze_prefix(embeddings: nn.Module, layers: nn.ModuleList, train_blocks: int) -> None:
+    """Freezes the embeddings and all but the last `train_blocks` transformer blocks; -1 keeps everything trainable."""
+    if train_blocks < 0:
+        return
+    for module in [embeddings, *layers[:len(layers) - train_blocks]]:
+        module.requires_grad_(False)
 
 
 class FeatureClipClassifier(nn.Module):

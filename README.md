@@ -3,8 +3,6 @@
 Input: potongan video **1 detik** (30 frame) seorang peserta ujian. Output: **0 = normal**
 atau **1 = curang**. Metrik: **F1-macro** (rata-rata F1 kelas normal dan kelas curang).
 
-README ini ditulis supaya orang yang baru belajar computer vision bisa mengikuti: baca berurutan dari atas.
-
 ## Daftar isi
 
 - [DS2026](#ds2026)
