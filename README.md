@@ -1,13 +1,13 @@
-# Data Slayer 4.0 - Deteksi Kecurangan Ujian dari Video
+# DS2026
 
-Kompetisi Kaggle `data-slayer-4`. Input: potongan video **1 detik** (30 frame) seorang peserta ujian. Output: **0 = normal**
+Input: potongan video **1 detik** (30 frame) seorang peserta ujian. Output: **0 = normal**
 atau **1 = curang**. Metrik: **F1-macro** (rata-rata F1 kelas normal dan kelas curang).
 
 README ini ditulis supaya orang yang baru belajar computer vision bisa mengikuti: baca berurutan dari atas.
 
 ## Daftar isi
 
-- [Data Slayer 4.0 - Deteksi Kecurangan Ujian dari Video](#data-slayer-40---deteksi-kecurangan-ujian-dari-video)
+- [DS2026](#ds2026)
   - [Daftar isi](#daftar-isi)
   - [1. Konsep dasar untuk pemula](#1-konsep-dasar-untuk-pemula)
   - [2. Data dan aturan lomba](#2-data-dan-aturan-lomba)
