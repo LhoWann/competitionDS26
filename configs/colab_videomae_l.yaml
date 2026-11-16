@@ -1,0 +1,32 @@
+# Colab A100: colab_videomae.yaml with VideoMAE-Large (Kinetics-400 fine-tuned, 304M parameters, ~3x the compute of
+# ViT-B). Batch 8 x grad_accum 2 keeps the 16-clip step inside 40 GB; lower backbone lr for the larger model.
+name: videomae_l_crop
+paths:
+  data_dir: /content/data
+  cache_dir: /content/cache
+  output_dir: /content/drive/MyDrive/DataSlayer26/outputs
+data:
+  num_frames: 16
+  img_size: [224, 224]
+  clips_per_video: 16
+  num_workers: 10
+  crop_scale: [0.7, 1.0]
+  speed_jitter: 0.2
+  grayscale: 0.1
+  person_crop: 1.15
+model:
+  kind: videomae
+  backbone: MCG-NJU/videomae-large-finetuned-kinetics
+  dropout: 0.3
+train:
+  folds: [0, 1, 2, 3, 4]
+  epochs: 10
+  batch_size: 8
+  grad_accum: 2
+  lr: 3.0e-4
+  backbone_lr: 1.0e-5
+  optimizer: adamw
+  ema: 0.998
+  select: f1_macro
+  patience: 3
+  mixed_precision: bf16

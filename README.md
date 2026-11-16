@@ -169,36 +169,67 @@ detail itu sekitar 1.5x. Crop dihitung dari klip itu sendiri, jadi tetap patuh a
 
 Semua angka = **OOF per klip, 5 fold per subjek** (`outputs/<run>/cv.json`). `F1@thr` = F1 pada threshold terbaik OOF.
 
+**Peringatan penting (bias pemilihan epoch).** Kalau tiap fold memilih epoch terbaiknya sendiri dari F1 validasi
+(`train.select=f1_macro`), skor OOF jadi terlalu tinggi 0.02-0.04, karena kurva F1 per epoch naik-turun dan kita selalu
+"memetik" puncak keberuntungan. Angka yang jujur didapat dengan **jumlah epoch tetap untuk semua fold**:
+`--set train.select=epoch train.patience=99 train.epochs=<N>` (N = epoch dengan rata-rata F1 antar fold tertinggi di
+`fold*/history.csv`). Bandingkan model hanya dengan angka jenis ini.
+
+Model yang dipakai (epoch tetap = angka jujur):
+
 | Run (config) | Ide | F1 | F1@thr | AUC |
 |---|---|---|---|---|
-| `convnext_t_t8` (`base.yaml`, Kaggle) | ConvNeXt-T fine-tune, frame penuh | 0.611 | 0.611 | 0.637 |
-| `feat_dinov3_vitb` (`feat_dinov3_b.yaml`) | DINOv3 beku + head | 0.592 | 0.592 | 0.611 |
-| `feat_grid_reg` (`feat_dinov3_reg.yaml` + `features.pool=grid`) | DINOv3 grid 2x4, regularisasi kuat | 0.617 | 0.617 | 0.626 |
-| `feat_cls_reg` (`feat_dinov3_reg.yaml`) | DINOv3 CLS+mean, regularisasi kuat | 0.595 | 0.595 | 0.622 |
-| `feat_pose_y11s` (`feat_pose.yaml`) | YOLO11s-pose beku + head | 0.633 | 0.638 | 0.669 |
-| `feat_pose_y26s` (`feat_pose.yaml` + `features.backbone=yolo26s-pose`) | YOLO26s-pose beku + head | **0.643** | 0.643 | 0.680 |
-| `ens_base_cls_pose` | ConvNeXt 0.3 + DINOv3-cls 0.5 + pose11 0.2 | 0.641 | 0.641 | 0.673 |
-| `ens_base_cls_pose2` | DINOv3-cls 0.2 + pose11 0.5 + pose26 0.3 | **0.648** | **0.650** | **0.692** |
+| `feat_pose_y26s_fix` (`feat_pose.yaml` + `features.backbone=yolo26s-pose`, 7 epoch) | YOLO26s-pose beku + head | **0.613** | 0.620 | 0.660 |
+| `feat_pose_y11s_fix` (`feat_pose.yaml`, 5 epoch) | YOLO11s-pose beku + head | 0.600 | 0.605 | 0.650 |
+| `feat_cls_reg_fix` (`feat_dinov3_reg.yaml`, 9 epoch) | DINOv3 CLS+mean beku + head | 0.564 | 0.567 | 0.595 |
+| rata-rata sama: ConvNeXt-T + pose11 + pose26 | ensemble 3 model | 0.612 | **0.625** | **0.671** |
+
+Run lama dengan epoch terbaik per fold (terlalu optimistis; disimpan karena dipakai submission 1):
+
+| Run (config) | Ide | F1 | F1@thr | AUC | Perkiraan jujur |
+|---|---|---|---|---|---|
+| `convnext_t_t8` (`base.yaml`, Kaggle) | ConvNeXt-T fine-tune, frame penuh | 0.611 | 0.611 | 0.637 | ~0.59 |
+| `feat_cls_reg` (`feat_dinov3_reg.yaml`) | DINOv3 CLS+mean | 0.595 | 0.595 | 0.622 | 0.564 |
+| `feat_pose_y11s` (`feat_pose.yaml`) | YOLO11s-pose | 0.633 | 0.638 | 0.669 | 0.600 |
+| `ens_base_cls_pose` | ConvNeXt 0.3 + DINOv3-cls 0.5 + pose11 0.2 | 0.641 | 0.641 | 0.673 | public 0.612 |
+
+Sudah dicoba lalu dibuang (config dan hasilnya dihapus):
+
+| Ide | Hasil | Alasan dibuang |
+|---|---|---|
+| DINOv3 beku tanpa regularisasi kuat; DINOv3 grid 2x4 | F1 0.59-0.62 (optimistis) | kalah dari versi CLS+mean dan dari pose |
+| ConvNeXt-B (Colab L4) | F1 0.584 fold 0 setelah 1 epoch | tidak lebih baik dari ConvNeXt-T, 9 menit per epoch |
+| Rekonstruksi struktur test (chain, pasangan depan/samping, subjek) | public 0.656 | dilarang FAQ 27 |
+| Normalisasi fitur per kelompok subjek (centering) | F1 turun | butuh pengelompokan test, dilarang |
+| Training pasangan depan+samping (pair bag) | tidak selesai | dirancang untuk keputusan per pasangan yang dilarang |
 
 Submission (public leaderboard):
 
 | Submission | Public | Catatan |
 |---|---|---|
 | ConvNeXt-T + rekonstruksi struktur test | 0.656 | **Melanggar FAQ 27**, kodenya sudah dihapus; jangan dipilih sebagai final |
-| `ens_base_cls_pose` | 0.612 | Patuh aturan |
+| `ens_base_cls_pose` | 0.612 | Patuh aturan; cocok dengan perkiraan OOF jujur |
 
 Pelajaran:
 
-- **Pose menang** walaupun modelnya kecil: tidak bisa "menghafal" penampilan subjek, sehingga lebih umum ke subjek baru.
-  YOLO26s sedikit lebih baik dari YOLO11s, dan keduanya saling melengkapi di ensemble.
+- **Pose paling kuat** walaupun modelnya kecil: tidak bisa "menghafal" penampilan subjek, sehingga lebih umum ke subjek
+  baru. YOLO26s lebih baik dari YOLO11s.
+- Perilaku yang paling sering tertukar (p_cheat OOF dekat 0.5): Writing_Answers vs Reading_Hidden_Notes, Checking vs
+  Using_Smartwatch, Looking_Around vs Repeated_Peeking. Thinking dan Looking_Under_the_Desk sudah mudah.
+- Kamera samping lebih sulit (akurasi 0.63 vs 0.67 depan). Akurasi per subjek 0.56-0.86, jadi public leaderboard (sekitar
+  2 subjek) sangat berisik: pilih model dari OOF jujur, bukan public.
 - Model besar di frame penuh cepat overfit (ConvNeXt-T terbaik di epoch 2-7; ConvNeXt-B tidak lebih baik setelah 1 epoch
   dan dihentikan).
 - Menormalkan fitur per kelompok subjek di test (centering) dan memanfaatkan urutan klip test **tidak diizinkan**; dicoba
   lalu dihapus.
-- Bobot ensemble dipilih dari OOF yang sama, jadi skornya sedikit optimistis; selisih di bawah ~0.01 belum tentu nyata.
+- Bobot ensemble yang dicari di OOF ikut optimistis; pakai bobot sama rata kecuali selisihnya besar.
 
-Sedang berjalan saat README ini ditulis: ConvNeXt-T + crop orang (`kaggle_t_crop.yaml`, Kaggle) dan VideoMAE + crop
-(`colab_videomae.yaml`, Colab A100).
+Sedang berjalan saat README ini ditulis:
+
+- ConvNeXt-T + crop orang (`kaggle_t_crop.yaml`, Kaggle 2xT4).
+- VideoMAE-B + crop (`colab_videomae.yaml`, Colab A100, sekitar 2.5 menit per epoch). Checkpoint awal fold 0 (epoch
+  1-2): F1 0.618, AUC 0.695, tertinggi di fold 0 sejauh ini (ConvNeXt-T 0.583 / 0.612).
+- Berikutnya: VideoMAE-Large (`colab_videomae_l.yaml`).
 
 ## 6. Struktur folder
 
@@ -221,7 +252,7 @@ src/
   inference/predict.py   rata-rata semua fold (+ flip TTA) -> test_probs.csv, submission.csv
   eda/explore.py         helper EDA
   cli/                   prepare, extract, train, predict, ensemble
-notebooks/               01 EDA, 02 laptop, 03 Kaggle 2xT4, 04 Colab ConvNeXt, 05 Colab VideoMAE
+notebooks/               01 EDA, 02 laptop, 03 Kaggle 2xT4, 05 Colab (VideoMAE + crop)
 tests/                   pytest (jalankan sebelum commit)
 ```
 
@@ -239,17 +270,17 @@ python -m venv .venv
 $env:PYTHONPATH = "src"
 # data lomba diekstrak ke data/ (kaggle competitions download -c data-slayer-4)
 .venv\Scripts\python -m cli.prepare --config configs/laptop.yaml --workers 6      # sekali, ~20 menit
-# Jalur 3 (pose, model terbaik saat ini)
-.venv\Scripts\python -m cli.extract --config configs/feat_pose.yaml --workers 4   # ~17 menit
-.venv\Scripts\python -m cli.train --config configs/feat_pose.yaml
-.venv\Scripts\python -m cli.predict --config configs/feat_pose.yaml
-# YOLO26: tambah --set features.backbone=yolo26s-pose name=feat_pose_y26s di ketiga perintah
+# Jalur 3 (pose YOLO26s, model tunggal terbaik saat ini); 7 epoch tetap = OOF jujur
+$S = "features.backbone=yolo26s-pose name=feat_pose_y26s_fix train.epochs=7 train.select=epoch train.patience=99"
+.venv\Scripts\python -m cli.extract --config configs/feat_pose.yaml --set $S --workers 4   # ~17 menit
+.venv\Scripts\python -m cli.train --config configs/feat_pose.yaml --set $S
+.venv\Scripts\python -m cli.predict --config configs/feat_pose.yaml --set $S
 # Jalur 2 (DINOv3)
 .venv\Scripts\python -m cli.extract --config configs/feat_dinov3_reg.yaml --workers 6
 .venv\Scripts\python -m cli.train --config configs/feat_dinov3_reg.yaml
 .venv\Scripts\python -m cli.predict --config configs/feat_dinov3_reg.yaml
 # Ensemble beberapa run yang sudah punya oof.csv + test_probs.csv
-.venv\Scripts\python -m cli.ensemble --runs outputs/feat_cls_reg outputs/feat_pose_y11s outputs/feat_pose_y26s --out outputs/ens_x
+.venv\Scripts\python -m cli.ensemble --runs outputs/feat_pose_y11s_fix outputs/feat_pose_y26s_fix --out outputs/ens_x
 .venv\Scripts\python -m pytest -q
 ```
 
@@ -263,14 +294,15 @@ Hasil tiap run: `outputs/<name>/` berisi `fold*/history.csv` (metrik per epoch),
    (`{"title": "dataslayer-src", "id": "<username>/dataslayer-src", "licenses": [{"name": "CC0-1.0"}]}`), lalu
    `kaggle datasets create -p kaggle_upload --dir-mode zip` (berikutnya `kaggle datasets version ...`).
 2. Jalankan `notebooks/03_kaggle_train.ipynb` dengan input `data-slayer-4` + `dataslayer-src`, GPU T4 x2, internet on.
-   Ganti `CONFIG` ke `base.yaml`, `kaggle_t_aug.yaml` atau `kaggle_t_crop.yaml` (untuk crop, jalankan dulu
-   `cli.extract --config configs/feat_pose.yaml`).
+   Ganti `CONFIG` ke `base.yaml` (frame penuh) atau `kaggle_t_crop.yaml` (crop orang; jalankan dulu
+   `cli.extract --config configs/feat_pose.yaml` untuk cache bbox).
 
 ### Colab (A100 / L4)
 
-Salin `src/`, `configs/`, `requirements.txt`, `secrets/kaggle.json` ke Drive `MyDrive/DataSlayer26/`, lalu buka
-`notebooks/04_colab_train.ipynb` (ConvNeXt) atau `notebooks/05_colab_videomae.ipynb` (VideoMAE + crop) di Colab. Di
-L4 (24 GB) notebook otomatis memakai batch 8 x grad_accum 2. Hasil tersimpan di Drive.
+Salin `src/`, `configs/`, `requirements.txt`, `secrets/kaggle.json` ke Drive `MyDrive/DataSlayer26/` (plus
+`cache/pose_cache.tgz` = isi `cache/features/yolo11s-pose_360x640_s2`, supaya ekstraksi pose tidak diulang), lalu buka
+`notebooks/05_colab_videomae.ipynb` di Colab. `CONFIG` = `colab_videomae.yaml` (ViT-B) atau `colab_videomae_l.yaml`
+(ViT-L). Di L4 (24 GB) notebook otomatis memakai batch 8 x grad_accum 2. Hasil tersimpan di Drive.
 
 ## 8. Cara mengembangkan di branch baru
 
@@ -290,7 +322,8 @@ Aturan main tim:
 
 1. **Satu eksperimen = satu config baru** di `configs/` (dengan komentar ide di baris pertama). Jangan ubah config lama
    yang hasilnya sudah tercatat.
-2. **Bandingkan hanya dengan OOF** (`cv.json`), bukan public leaderboard (public hanya sebagian kecil test dan berisik).
+2. **Bandingkan hanya dengan OOF jujur** (`cv.json` dari run berepoch tetap), bukan public leaderboard (public hanya
+   sebagian kecil test dan berisik).
 3. Setiap fungsi baru harus dipanggil dari `cli/` dan punya test di `tests/`.
 4. Jangan commit data, `cache/`, `outputs/`, bobot model, atau `kaggle.json`.
 5. Setiap klip test diprediksi sendiri. Jangan pakai urutan, kemiripan, atau pengelompokan klip test.
@@ -298,9 +331,14 @@ Aturan main tim:
 
 Ide lanjutan yang belum dicoba (urut dari yang paling menjanjikan):
 
-- Hasil crop ConvNeXt-T dan VideoMAE (sedang berjalan) -> masukkan ke ensemble jika OOF naik.
+- Hasil crop ConvNeXt-T dan VideoMAE (sedang berjalan) -> masukkan ke ensemble jika OOF jujur naik.
+- Freeze lalu unfreeze backbone (LP-FT, Kumar et al. 2022, https://arxiv.org/abs/2202.10054): latih head dulu dengan
+  backbone beku, baru fine-tune penuh; ditambah layer-wise LR decay 0.7-0.75 seperti resep VideoMAE
+  (https://arxiv.org/abs/2203.12602).
+- Model final dilatih di seluruh 26 subjek dengan jumlah epoch tetap (data 25% lebih banyak dari model per fold).
+- Uji `data.hflip=0` (flip pada kamera samping menghasilkan orientasi yang tidak ada di test).
 - Pose: model `yolo26m-pose` / `yolo26l-pose`, fitur kecepatan keypoint antar frame, head GRU/TCN, gabung pose + DINOv3
   dalam satu head.
-- Crop: margin dan resolusi lain, crop khusus kepala + tangan, VideoMAE-Large / VideoMAE V2.
+- Crop: margin dan resolusi lain, crop khusus kepala + tangan, VideoMAE V2.
 - Anotasi manual (diizinkan): tandai detik-detik saat aksi curang benar-benar terjadi, supaya label klip tidak berisik.
-- Kalibrasi threshold per kamera (depan/samping) dari OOF; kamera bisa ditebak dari klip itu sendiri.#
+- Kalibrasi threshold per kamera (depan/samping) dari OOF; kamera bisa ditebak dari klip itu sendiri.
