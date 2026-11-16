@@ -7,14 +7,24 @@ README ini ditulis supaya orang yang baru belajar computer vision bisa mengikuti
 
 ## Daftar isi
 
-1. [Konsep dasar untuk pemula](#1-konsep-dasar-untuk-pemula)
-2. [Data dan aturan lomba](#2-data-dan-aturan-lomba)
-3. [Temuan EDA](#3-temuan-eda)
-4. [Alur kerja (diagram)](#4-alur-kerja-diagram)
-5. [Hasil sejauh ini](#5-hasil-sejauh-ini)
-6. [Struktur folder](#6-struktur-folder)
-7. [Cara menjalankan](#7-cara-menjalankan)
-8. [Cara mengembangkan di branch baru](#8-cara-mengembangkan-di-branch-baru)
+- [Data Slayer 4.0 - Deteksi Kecurangan Ujian dari Video](#data-slayer-40---deteksi-kecurangan-ujian-dari-video)
+  - [Daftar isi](#daftar-isi)
+  - [1. Konsep dasar untuk pemula](#1-konsep-dasar-untuk-pemula)
+  - [2. Data dan aturan lomba](#2-data-dan-aturan-lomba)
+  - [3. Temuan EDA](#3-temuan-eda)
+  - [4. Alur kerja (diagram)](#4-alur-kerja-diagram)
+    - [4.1 Gambaran besar](#41-gambaran-besar)
+    - [4.2 Validasi per subjek (5 fold)](#42-validasi-per-subjek-5-fold)
+    - [4.3 Isi satu model klip (Jalur 1)](#43-isi-satu-model-klip-jalur-1)
+    - [4.4 Jalur fitur beku (Jalur 2 dan 3)](#44-jalur-fitur-beku-jalur-2-dan-3)
+    - [4.5 Crop orang (Jalur 4)](#45-crop-orang-jalur-4)
+  - [5. Hasil sejauh ini](#5-hasil-sejauh-ini)
+  - [6. Struktur folder](#6-struktur-folder)
+  - [7. Cara menjalankan](#7-cara-menjalankan)
+    - [Laptop (Windows, GPU kecil)](#laptop-windows-gpu-kecil)
+    - [Kaggle (2x T4)](#kaggle-2x-t4)
+    - [Colab (A100 / L4)](#colab-a100--l4)
+  - [8. Cara mengembangkan di branch baru](#8-cara-mengembangkan-di-branch-baru)
 
 ## 1. Konsep dasar untuk pemula
 
@@ -293,5 +303,4 @@ Ide lanjutan yang belum dicoba (urut dari yang paling menjanjikan):
   dalam satu head.
 - Crop: margin dan resolusi lain, crop khusus kepala + tangan, VideoMAE-Large / VideoMAE V2.
 - Anotasi manual (diizinkan): tandai detik-detik saat aksi curang benar-benar terjadi, supaya label klip tidak berisik.
-- Kalibrasi threshold per kamera (depan/samping) dari OOF; kamera bisa ditebak dari klip itu sendiri.#   c o m p e t i t i o n D S 2 6  
- 
+- Kalibrasi threshold per kamera (depan/samping) dari OOF; kamera bisa ditebak dari klip itu sendiri.#
