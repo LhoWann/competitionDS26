@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import cv2
@@ -5,26 +6,29 @@ import numpy as np
 import pandas as pd
 import pytest
 import torch
+import yaml
 from accelerate import Accelerator
 
 from core.config import load_config
-from dataset.clips import SequenceDataset, VideoClipDataset, frame_indices, person_box
-from dataset.features import FeatureClipDataset, FeatureSequenceDataset, frame_vectors
+from dataset.clips import SequenceDataset, VideoClipDataset, frame_indices, person_box, roi_boxes
+from dataset.features import FeatureClipDataset, FeatureSequenceDataset
 from dataset.labels import BEHAVIORS, CHEAT_IDS
-from dataset.prepare import extract_video
+from dataset.prepare import build_index, extract_video
 from evaluation.ensemble import PROB_COLS, ensemble
+from evaluation.gradcam import gradcam
 from evaluation.metrics import best_threshold, binary_metrics, evaluate_clips
 from features.extract import extract
 from features.pose import POSE_DIM, pose_vector
-from models.clip_classifier import ClipClassifier, cheat_log_probs
-from training.cv import summarize
+from inference.predict import predict
+from models.clip_classifier import cheat_log_probs
+from training.cv import pending_folds, run, summarize
 from training.engine import build_model, predictions_frame, train_fold
 from training.losses import clip_loss
 from training.optim import build_optimizer, cosine_schedule
 
 
 def tiny_cfg(*extra: str):
-    return load_config(None, ["model.backbone=resnet18", "model.pretrained=false", "data.num_frames=4",
+    return load_config(None, ["model.pretrained=false", "data.num_frames=4",
                               "data.img_size=[64,96]", "data.clips_per_video=2", "data.color_jitter=0.0", *extra])
 
 
@@ -33,6 +37,9 @@ def test_config_overrides_and_unknown_key():
     assert cfg.train.epochs == 7 and cfg.data.img_size == [1, 2] and cfg.name == "debug"
     with pytest.raises(KeyError):
         load_config(None, ["train.nope=1"])
+    cfg = load_config(None, ["train.mixed_precision=no", "model.pretrained=false", "train.lr=3e-4", "train.ema=1"])
+    assert cfg.train.mixed_precision == "no" and cfg.model.pretrained is False
+    assert cfg.train.lr == 3e-4 and isinstance(cfg.train.ema, float)
 
 
 def test_behaviors_split_by_label():
@@ -95,12 +102,12 @@ def test_clip_datasets(fake_cache, tmp_path):
 
 
 @pytest.mark.parametrize("opt", ["adamw", "muon"])
-def test_model_train_step(opt):
-    cfg = tiny_cfg(f"train.optimizer={opt}")
-    model = ClipClassifier(cfg.model, cfg.data.num_frames, cfg.data.img_size)
+def test_pose_head_train_step(opt):
+    cfg = tiny_cfg(f"train.optimizer={opt}", "model.kind=features", "model.hidden=16", "model.temporal_heads=2")
+    model = build_model(cfg, POSE_DIM)
     optimizer = build_optimizer(model, cfg.train)
     sched = cosine_schedule(optimizer, 1, 4)
-    x = torch.randint(0, 255, (2, 4, 3, 64, 96), dtype=torch.uint8)
+    x = torch.randn(2, cfg.data.clip_len // cfg.features.stride, POSE_DIM)
     before = model.temporal.layers[0].linear1.weight.clone()
     loss = clip_loss(model(x), torch.tensor([0, 5]), torch.tensor([0, 1]), cfg.train)
     loss.backward()
@@ -124,16 +131,11 @@ def test_predictions_and_summary(tmp_path):
     assert (tmp_path / "cv.json").exists() and 0 <= cv["f1_macro"] <= 1
 
 
-def test_frame_vectors_pools():
-    tokens = np.random.rand(5, 3, 4).astype(np.float16)
-    assert frame_vectors(tokens, "cls").shape == (5, 4)
-    assert np.allclose(frame_vectors(tokens, "cls_mean")[:, 4:], tokens[:, 1:].astype(np.float32).mean(1), atol=1e-3)
-    assert frame_vectors(tokens, "grid").shape == (5, 12)
-    with pytest.raises(ValueError):
-        frame_vectors(tokens, "nope")
-
-
-def test_feature_cache_and_head(fake_cache, tmp_path):
+def test_pose_vector_cache_and_head(fake_cache, tmp_path):
+    kpts = np.stack([np.full(17, 120.0), np.full(17, 60.0), np.full(17, 0.9)], 1)
+    v = pose_vector(np.array([100.0, 20.0, 140.0, 100.0]), 0.8, kpts, (360, 640))
+    assert v.shape == (POSE_DIM,) and np.allclose(v[:34], 0.0)
+    assert np.allclose(v[-5:], [40 / 640, 80 / 360, 120 / 640, 60 / 360, 0.8])
     _, videos = fake_cache
     videos.to_csv(tmp_path / "videos.csv", index=False)
     seq = tmp_path / "data" / "test" / "test_seq_00001"
@@ -141,19 +143,16 @@ def test_feature_cache_and_head(fake_cache, tmp_path):
     for i in range(30):
         cv2.imwrite(str(seq / f"{i + 1:02d}.jpg"), np.zeros((36, 64, 3), np.uint8))
     tmp = tmp_path.as_posix()
-    cfg = load_config(None, [f"paths.cache_dir={tmp}", f"paths.data_dir={tmp}/data",
-                             "features.backbone=vit_tiny_patch16_224", "features.img_size=[32,64]",
-                             "features.grid=[1,2]", "features.batch_size=7", "model.kind=features",
+    cfg = load_config(None, [f"paths.cache_dir={tmp}", f"paths.data_dir={tmp}/data", "features.backbone=yolo11n-pose",
+                             "features.img_size=[64,96]", "features.batch_size=8", "model.kind=features",
                              "model.hidden=16", "model.temporal_heads=2", "data.clips_per_video=2"])
     root = extract(cfg, workers=0, pretrained=False)
-    assert np.load(root / "train" / "s0_v0.npy").shape == (33, 3, 192)
-    assert np.load(root / "test" / "test_seq_00001.npy").shape == (15, 3, 192)
-
+    assert np.load(root / "train" / "s0_v0.npy").shape == (33, 1, POSE_DIM)
+    assert np.load(root / "test" / "test_seq_00001.npy").shape == (15, 1, POSE_DIM)
     va = FeatureClipDataset(videos, cfg, train=False)
-    assert len(va) == 8 and va.dim == 384 and va[1]["inputs"].shape == (15, 384) and va[1]["start"] == 30
+    assert len(va) == 8 and va.dim == POSE_DIM and va[1]["inputs"].shape == (15, POSE_DIM) and va[1]["start"] == 30
     te = FeatureSequenceDataset(cfg)
-    assert te.ids == ["test_seq_00001"] and te[0]["inputs"].shape == (15, 384)
-
+    assert te.ids == ["test_seq_00001"] and te[0]["inputs"].shape == (15, POSE_DIM)
     model = build_model(cfg, va.dim)
     optimizer = build_optimizer(model, cfg.train)
     before = model.temporal.layers[0].linear1.weight.clone()
@@ -161,19 +160,6 @@ def test_feature_cache_and_head(fake_cache, tmp_path):
     clip_loss(model(x), torch.tensor([0, 5]), torch.tensor([0, 1]), cfg.train).backward()
     optimizer.step()
     assert not torch.equal(before, model.temporal.layers[0].linear1.weight)
-
-
-def test_pose_vector_and_pose_cache(fake_cache, tmp_path):
-    kpts = np.stack([np.full(17, 120.0), np.full(17, 60.0), np.full(17, 0.9)], 1)
-    v = pose_vector(np.array([100.0, 20.0, 140.0, 100.0]), 0.8, kpts, (360, 640))
-    assert v.shape == (POSE_DIM,) and np.allclose(v[:34], 0.0)
-    assert np.allclose(v[-5:], [40 / 640, 80 / 360, 120 / 640, 60 / 360, 0.8])
-    _, videos = fake_cache
-    videos.to_csv(tmp_path / "videos.csv", index=False)
-    cfg = load_config(None, [f"paths.cache_dir={tmp_path.as_posix()}", "paths.data_dir=missing",
-                             "features.backbone=yolo11n-pose", "features.img_size=[64,96]", "features.batch_size=8"])
-    root = extract(cfg, workers=0, pretrained=False)
-    assert np.load(root / "train" / "s0_v0.npy").shape == (33, 1, POSE_DIM)
 
 
 def test_videomae_classifier_trains_backbone():
@@ -236,8 +222,31 @@ def test_ensemble_picks_informative_run(tmp_path):
         cols.assign(id=[f"t{i:03d}" for i in range(160)]).to_csv(d / "test_probs.csv", index=False)
         runs.append(d)
     cv = ensemble(runs, tmp_path / "ens", step=0.5)
-    assert cv["weights"]["good"] >= 0.5 and cv["f1_best"] == 1.0
+    assert cv["weights"]["good"] >= 0.5 and cv["f1_best"] == 1.0 and cv["n_clips"] == 160
+    oof = pd.read_csv(runs[1] / "oof.csv")
+    oof.iloc[:80].to_csv(runs[1] / "oof.csv", index=False)
+    assert ensemble(runs, tmp_path / "ens2", step=0.5)["n_clips"] == 80
+    assert ensemble(runs, tmp_path / "ens3", weights=[0.5, 0.5])["weights"] == {"good": 0.5, "noise": 0.5}
+    for name in ("oof", "test_probs"):
+        (runs[0] / f"{name}_flip.csv").write_bytes((runs[0] / f"{name}.csv").read_bytes())
+    cv = ensemble([Path(f"{runs[0]}@flip"), runs[1]], tmp_path / "ens4", weights=[1.0, 0.0])
+    assert cv["weights"] == {"good_flip": 1.0, "noise": 0.0} and cv["n_clips"] == 80
+    with pytest.raises(ValueError):
+        ensemble([Path(f"{runs[0]}@nope")], tmp_path / "ens5")
     assert pd.read_csv(tmp_path / "ens" / "submission.csv").label.tolist() == (beh >= 4).astype(int).tolist()
+
+def test_build_index_folds_are_subject_disjoint(tmp_path):
+    for s in range(7):
+        for label, behaviors in (("normal", BEHAVIORS[:4]), ("cheat", BEHAVIORS[4:])):
+            d = tmp_path / "train" / label / f"subject_{s}"
+            d.mkdir(parents=True)
+            for b in behaviors:
+                for view in ("front", "side"):
+                    (d / f"{view}_{b}.MOV").touch()
+    df = build_index(tmp_path, n_folds=3, seed=42)
+    assert len(df) == 7 * 16 and df.groupby("subject").fold.nunique().max() == 1
+    assert df.groupby("subject").view.nunique().min() == 2 and sorted(df.groupby("fold").subject.nunique()) == [2, 2, 3]
+    assert (df.groupby("fold").label.mean() == 0.5).all() and df.equals(build_index(tmp_path, n_folds=3, seed=42))
 
 def test_extract_video_matches_test_format(tmp_path):
     path = tmp_path / "v.avi"
@@ -293,5 +302,117 @@ def test_train_fold_ema_clip_selection(video_cache, tmp_path):
                    "data.speed_jitter=0.2", "train.epochs=2", "train.batch_size=2", "train.ema=0.9",
                    "train.select=auc", "train.mixed_precision=no")
     oof = train_fold(cfg, 0, videos, Accelerator(cpu=True))
-    assert len(oof) == 8 and {"auc", "f1_macro"} <= set(pd.read_csv(cfg.run_dir / "fold0" / "history.csv"))
+    assert len(oof) == 8 and {"auc", "f1_macro", "auc_flip"} <= set(pd.read_csv(cfg.run_dir / "fold0" / "history.csv"))
     assert (cfg.run_dir / "fold0" / "best.pt").exists() and oof.subject.eq("s0").all()
+    flip = pd.read_csv(cfg.run_dir / "fold0" / "oof_flip.csv")
+    assert flip[["video_id", "start"]].equals(oof[["video_id", "start"]]) and flip.p_cheat.between(0, 1).all()
+
+
+def test_stop_epoch_keeps_long_schedule(video_cache, tmp_path):
+    _, videos = video_cache
+    tmp = tmp_path.as_posix()
+    cfg = tiny_cfg(f"paths.cache_dir={tmp}", f"paths.output_dir={tmp}/out", "data.num_workers=0", "train.epochs=4",
+                   "train.stop_epoch=2", "train.eval_last=true", "train.batch_size=2", "train.select=epoch",
+                   "train.patience=99", "train.warmup_epochs=0", "train.mixed_precision=no")
+    train_fold(cfg, 0, videos, Accelerator(cpu=True))
+    hist = pd.read_csv(cfg.run_dir / "fold0" / "history.csv")
+    assert hist.epoch.tolist() == [1] and len(pd.read_csv(cfg.run_dir / "fold0" / "oof.csv")) == 8
+    with pytest.raises(ValueError):
+        train_fold(tiny_cfg(f"paths.output_dir={tmp}/bad", "train.eval_last=true", "train.select=auc"), 0, videos,
+                   Accelerator(cpu=True))
+
+
+def test_predict_refuses_unfinished_fold(tmp_path):
+    cfg = tiny_cfg(f"paths.output_dir={tmp_path.as_posix()}", f"paths.data_dir={tmp_path.as_posix()}")
+    (cfg.run_dir / "fold0").mkdir(parents=True)
+    torch.save({}, cfg.run_dir / "fold0" / "best.pt")
+    with pytest.raises(RuntimeError, match="fold0"):
+        predict(cfg)
+
+
+def seated_pose(n: int) -> np.ndarray:
+    """(n, 1, 56) pose cache of one centred person: head 0.3 box heights up, wrists 0.2 down and 0.2 to the sides."""
+    pose = np.zeros((n, 1, POSE_DIM), np.float32)
+    xy = np.zeros((17, 2), np.float32)
+    xy[:5] = [0.0, -0.3]
+    xy[9], xy[10] = [0.2, 0.2], [-0.2, 0.2]
+    pose[:, 0, :34] = xy.ravel()
+    pose[:, 0, 34:51] = 0.9
+    pose[:, 0, -5:] = [0.3, 0.6, 0.5, 0.5, 0.9]
+    return pose
+
+
+def test_roi_boxes():
+    head, right, left = roi_boxes(seated_pose(5)[:, 0], 0.5)
+    assert np.isclose((head[0] + head[2]) / 2, 0.5) and np.isclose((head[1] + head[3]) / 2, 0.5 - 0.3 * 0.6)
+    assert np.isclose((head[2] - head[0]) * 640, 2 * (head[3] - head[1]) * 360)
+    assert (right[0] + right[2]) / 2 < 0.5 < (left[0] + left[2]) / 2
+    assert roi_boxes(np.zeros((3, POSE_DIM), np.float32), 0.5) is None
+
+
+def test_gradcam_report(video_cache, tmp_path):
+    frames_dir, videos = video_cache
+    crop = tmp_path / "features" / "crop" / "train"
+    crop.mkdir(parents=True)
+    for v in videos.video_id:
+        np.save(crop / f"{v}.npy", seated_pose(33).astype(np.float16))
+    cfg = tiny_cfg("model.kind=videomae", "data.img_size=[32,48]", f"paths.cache_dir={tmp_path.as_posix()}",
+                   "data.crop_features=crop", "data.person_crop=1.2", "data.num_workers=0")
+    torch.save(build_model(cfg).state_dict(), tmp_path / "best.pt")
+    summary = gradcam(cfg, 0, tmp_path / "best.pt", tmp_path / "cam", n_show=2, batch_size=4)
+    df = pd.read_csv(tmp_path / "cam" / "gradcam.csv")
+    assert len(df) == 8 and df.roi_mass.between(0, 1).all() and (df.roi_area > 0).all()
+    assert summary["right"]["n"] + summary["wrong"]["n"] == 8 and (tmp_path / "cam" / "summary.json").exists()
+
+
+def test_train_then_predict_with_crops(video_cache, tmp_path):
+    frames_dir, videos = video_cache
+    for split, names in (("train", videos.video_id), ("test", ["test_seq_00001"])):
+        (tmp_path / "features" / "crop" / split).mkdir(parents=True)
+        for v in names:
+            np.save(tmp_path / "features" / "crop" / split / f"{v}.npy", seated_pose(33 if split == "train" else 15))
+    seq = tmp_path / "data" / "test" / "test_seq_00001"
+    seq.mkdir(parents=True)
+    for i in range(30):
+        cv2.imwrite(str(seq / f"{i + 1:02d}.jpg"), np.full((36, 64, 3), i, np.uint8))
+    tmp = tmp_path.as_posix()
+    cfg = tiny_cfg(f"paths.cache_dir={tmp}", f"paths.data_dir={tmp}/data", f"paths.output_dir={tmp}/out",
+                   "data.crop_features=crop", "data.person_crop=1.15", "data.num_workers=0", "train.folds=[0]",
+                   "train.epochs=3", "train.stop_epoch=1", "train.batch_size=2", "train.select=epoch",
+                   "train.patience=99", "train.mixed_precision=no")
+    cv = run(cfg)
+    probs = predict(cfg)
+    sub = pd.read_csv(cfg.run_dir / "submission.csv")
+    assert 0 <= cv["thr"] <= 1 and len(pd.read_csv(cfg.run_dir / "oof.csv")) == 8
+    assert probs.id.tolist() == sub.id.tolist() == ["test_seq_00001"] and probs.p_cheat.between(0, 1).all()
+    assert sub.label.iloc[0] == int(probs.p_cheat.iloc[0] >= cv["thr"])
+    cv_flip = json.loads((cfg.run_dir / "cv_flip.json").read_text())
+    flip, sub_flip = (pd.read_csv(cfg.run_dir / f"{n}_flip.csv") for n in ("test_probs", "submission"))
+    assert len(pd.read_csv(cfg.run_dir / "oof_flip.csv")) == 8 and flip.id.tolist() == ["test_seq_00001"]
+    assert sub_flip.label.iloc[0] == int(flip.p_cheat.iloc[0] >= cv_flip["thr"])
+
+
+def test_resume_skips_finished_folds_of_the_same_recipe(tmp_path):
+    cfg = tiny_cfg(f"paths.output_dir={tmp_path.as_posix()}", "train.folds=[0,1,2]", "train.batch_size=8")
+    cfg.run_dir.mkdir(parents=True)
+    (cfg.run_dir / "config.yaml").write_text(yaml.safe_dump(cfg.to_dict()))
+    for fold, files in ((0, ("oof.csv", "best.pt")), (1, ("oof.csv",))):
+        (cfg.run_dir / f"fold{fold}").mkdir()
+        for name in files:
+            (cfg.run_dir / f"fold{fold}" / name).touch()
+    assert pending_folds(cfg) == [0, 1, 2]
+    split = tiny_cfg(f"paths.output_dir={tmp_path.as_posix()}", "train.folds=[0,1,2]", "train.resume=true",
+                     "train.batch_size=4", "train.grad_accum=2", "data.num_workers=7")
+    assert pending_folds(split) == [1, 2]
+    with pytest.raises(ValueError):
+        pending_folds(tiny_cfg(f"paths.output_dir={tmp_path.as_posix()}", "train.resume=true", "train.lr=1e-3"))
+
+
+def test_predict_refuses_checkpoints_without_matching_oof(tmp_path):
+    cfg = tiny_cfg(f"paths.output_dir={tmp_path.as_posix()}", f"paths.data_dir={tmp_path.as_posix()}")
+    for fold, files in ((0, ("best.pt", "oof.csv")), (1, ("oof.csv",))):
+        (cfg.run_dir / f"fold{fold}").mkdir(parents=True)
+        for name in files:
+            (cfg.run_dir / f"fold{fold}" / name).touch()
+    with pytest.raises(RuntimeError, match="fold1"):
+        predict(cfg)

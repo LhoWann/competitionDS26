@@ -1,5 +1,4 @@
-"""Frozen-backbone feature cache: per-frame CLS token + patch tokens average-pooled to a coarse grid (timm ViT), or a
-keypoint vector (`features.backbone=yolo*-pose`, see `features.pose`).
+"""Frozen YOLO-pose feature cache: one keypoint vector per frame (`features.backbone=yolo*-pose`, see `features.pose`).
 
 Writes `{cfg.feature_dir}/train/{video_id}.npy` (every `stride`-th cached frame) and `{cfg.feature_dir}/test/{seq}.npy`
 (every `stride`-th of the 30 test frames), each float16 of shape (frames, tokens, dim).
@@ -9,9 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import timm
 import torch
-import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
@@ -33,27 +30,6 @@ class FrameDataset(Dataset):
 
     def __getitem__(self, idx: int) -> torch.Tensor:
         return load_frames([self.paths[idx]], self.size_hw)[0]
-
-
-class FrozenEncoder(nn.Module):
-    """timm ViT whose final-norm tokens are reduced to [CLS, pooled patch grid] per frame."""
-
-    def __init__(self, cfg: FeaturesConfig, pretrained: bool = True) -> None:
-        super().__init__()
-        self.backbone = timm.create_model(cfg.backbone, pretrained=pretrained, num_classes=0).eval()
-        self.backbone.set_input_size(img_size=tuple(cfg.img_size))
-        self.grid = tuple(cfg.grid)
-        data_cfg = timm.data.resolve_data_config({}, model=self.backbone)
-        self.register_buffer("mean", torch.tensor(data_cfg["mean"]).view(1, 3, 1, 1) * 255, persistent=False)
-        self.register_buffer("std", torch.tensor(data_cfg["std"]).view(1, 3, 1, 1) * 255, persistent=False)
-
-    @torch.inference_mode()
-    def forward(self, frames: torch.Tensor) -> torch.Tensor:
-        tokens = self.backbone.forward_features((frames.float() - self.mean) / self.std).float()
-        h, w = self.backbone.patch_embed.grid_size
-        patches = tokens[:, self.backbone.num_prefix_tokens:].transpose(1, 2).unflatten(2, (h, w))
-        grid = F.adaptive_avg_pool2d(patches, self.grid).flatten(2).transpose(1, 2)
-        return torch.cat([tokens[:, :1], grid], 1)
 
 
 def encode_to_files(encoder: nn.Module, jobs: list[tuple[Path, list[Path]]], cfg: FeaturesConfig,
@@ -88,7 +64,5 @@ def extract(cfg: Config, workers: int, pretrained: bool = True) -> Path:
     jobs = [j for j in jobs if not j[0].exists()]
     if jobs:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        encoder = (PoseEncoder(fc, cache / "weights", pretrained) if fc.backbone.startswith("yolo")
-                   else FrozenEncoder(fc, pretrained))
-        encode_to_files(encoder.to(device), jobs, fc, workers)
+        encode_to_files(PoseEncoder(fc, cache / "weights", pretrained).to(device), jobs, fc, workers)
     return root

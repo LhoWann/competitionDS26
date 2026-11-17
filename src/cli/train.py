@@ -2,7 +2,7 @@
 
 Usage:
     python -m cli.train --config configs/debug.yaml
-    accelerate launch --multi_gpu --num_processes 2 -m cli.train --config configs/base.yaml
+    accelerate launch --multi_gpu --num_processes 2 -m cli.train --config configs/colab_videomae.yaml
 """
 
 from cli import config_parser

@@ -2,7 +2,7 @@
 
 Usage:
     python -m cli.predict --config configs/debug.yaml
-    accelerate launch --multi_gpu --num_processes 2 -m cli.predict --config configs/base.yaml
+    accelerate launch --multi_gpu --num_processes 2 -m cli.predict --config configs/colab_videomae.yaml
 """
 
 from cli import config_parser
@@ -11,10 +11,8 @@ from inference.predict import predict
 
 
 def main() -> None:
-    parser = config_parser(__doc__)
-    parser.add_argument("--no-tta", action="store_true")
-    args = parser.parse_args()
-    predict(load_config(args.config, args.set), hflip_tta=not args.no_tta)
+    args = config_parser(__doc__).parse_args()
+    predict(load_config(args.config, args.set))
 
 
 if __name__ == "__main__":

@@ -50,6 +50,42 @@ def person_box(poses: np.ndarray, margin: float, out_hw: list[int], frame_hw: tu
     return x0, y0, x0 + w, y0 + h
 
 
+# Head (twice as wide as tall) and right / left wrist boxes as (COCO keypoints, rows, cols) units.
+ROI_PARTS = (([0, 1, 2, 3, 4], 1, 2), ([10], 1, 1), ([9], 1, 1))
+
+
+def roi_boxes(poses: np.ndarray, size: float, frame_hw: tuple[int, int] = (360, 640),
+              min_conf: float = 0.3) -> list[tuple[float, ...]] | None:
+    """Fractional boxes around the head and both wrists over one clip (`features.pose` vectors (N, 56)): `size`
+    person-box heights per unit of `ROI_PARTS` plus the keypoints' travel, at that aspect; None if nobody was detected.
+    A keypoint never seen falls back to the person box centre."""
+    det = poses[poses[:, -1] > min_conf]
+    if not len(det):
+        return None
+    fh, fw = frame_hw
+    bh = det[:, -4:-3]
+    kx = (det[:, -3:-2] + det[:, 0:34:2] * bh * fh / fw) * fw
+    ky = (det[:, -2:-1] + det[:, 1:34:2] * bh) * fh
+    vis = det[:, 34:51] > min_conf
+    side = size * float(np.median(bh)) * fh
+    boxes = []
+    for kpts, rows, cols in ROI_PARTS:
+        m = vis[:, kpts]
+        xs, ys = (kx[:, kpts][m], ky[:, kpts][m]) if m.any() else (det[:, -3] * fw, det[:, -2] * fh)
+        w, h = side * cols + np.ptp(xs), side * rows + np.ptp(ys)
+        w, h = max(w, h * cols / rows), max(h, w * rows / cols)
+        w, h = min(w / fw, 1.0), min(h / fh, 1.0)
+        x0 = float(np.clip((xs.min() + xs.max()) / 2 / fw - w / 2, 0, 1 - w))
+        y0 = float(np.clip((ys.min() + ys.max()) / 2 / fh - h / 2, 0, 1 - h))
+        boxes.append((x0, y0, x0 + w, y0 + h))
+    return boxes
+
+
+def load_clip(paths: list[Path], poses: np.ndarray | None, cfg: DataConfig) -> torch.Tensor:
+    """One clip's frames, cropped to the person box of the clip's own pose vectors when given (`data.person_crop`)."""
+    return load_frames(paths, cfg.img_size, None if poses is None else person_box(poses, cfg.person_crop, cfg.img_size))
+
+
 class VideoClipDataset(Dataset):
     """Clips from cached train videos.
 
@@ -76,6 +112,13 @@ class VideoClipDataset(Dataset):
     def __len__(self) -> int:
         return len(self.items)
 
+    def clip_poses(self, vi: int, start: int, length: int) -> np.ndarray | None:
+        """Pose vectors (strided cache) of the frames [start, start + length) of video `vi`, None without a cache."""
+        if self.poses is None:
+            return None
+        step = max(1, round(self.videos.n_frames[vi] / len(self.poses[vi])))
+        return self.poses[vi][start // step:(start + length - 1) // step + 1]
+
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor | int]:
         vi, start = self.items[idx]
         row = self.videos.iloc[vi]
@@ -85,13 +128,8 @@ class VideoClipDataset(Dataset):
             length = min(row.n_frames, round(length * self.rng.uniform(1 - j, 1 + j)))
             start = int(self.rng.integers(0, row.n_frames - length + 1))
         ids = frame_indices(start, length, self.cfg.num_frames, self.train, self.rng)
-        box = None
-        if self.poses is not None:
-            poses = self.poses[vi]
-            step = max(1, round(row.n_frames / len(poses)))
-            box = person_box(poses[start // step:(start + length - 1) // step + 1], self.cfg.person_crop,
-                             self.cfg.img_size)
-        clip = load_frames([self.frames_dir / row.video_id / f"{i:05d}.jpg" for i in ids], self.cfg.img_size, box)
+        paths = [self.frames_dir / row.video_id / f"{i:05d}.jpg" for i in ids]
+        clip = load_clip(paths, self.clip_poses(vi, start, length), self.cfg)
         return {"inputs": clip if self.augment is None else self.augment(clip), "behavior": int(row.behavior_id),
                 "label": int(row.label), "video": vi, "start": start}
 
@@ -116,11 +154,10 @@ class SequenceDataset(Dataset):
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor | int]:
         frames = sorted(self.seqs[idx].glob("*.jpg"))
         ids = frame_indices(0, len(frames), self.cfg.num_frames, False, np.random.default_rng())
-        box = None
+        poses = None
         if self.crop_dir is not None:
             poses = np.load(self.crop_dir / "test" / f"{self.seqs[idx].name}.npy")[:, 0].astype(np.float32)
-            box = person_box(poses, self.cfg.person_crop, self.cfg.img_size)
-        return {"inputs": load_frames([frames[i] for i in ids], self.cfg.img_size, box), "index": idx}
+        return {"inputs": load_clip([frames[i] for i in ids], poses, self.cfg), "index": idx}
 
     @property
     def ids(self) -> list[str]:

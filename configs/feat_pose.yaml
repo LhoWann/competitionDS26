@@ -1,13 +1,14 @@
-# Laptop: frozen YOLO11s-pose keypoints (COCO weights, cli.extract at native 640x360) + small temporal head. Keypoints
-# are box-relative, so they carry body motion but not clothes, face or camera colour (the subject shift).
-name: feat_pose_y11s
+# Laptop: frozen YOLO26s-pose keypoints (COCO weights, cli.extract at native 640x360) + small temporal head. Keypoints
+# are box-relative, so they carry body motion but not clothes, face or camera colour (the subject shift). Fixed 7
+# epochs = the fold-mean peak (honest OOF F1 0.613, AUC 0.660). The person-crop boxes of the video models come from the
+# YOLO11s cache instead: `cli.extract --config configs/feat_pose.yaml --set features.backbone=yolo11s-pose`.
+name: feat_pose_y26s_fix
 data:
   num_workers: 0
 features:
-  backbone: yolo11s-pose
+  backbone: yolo26s-pose
   img_size: [360, 640]
   stride: 2
-  pool: cls
   batch_size: 32
 model:
   kind: features
@@ -17,9 +18,10 @@ model:
   temporal_heads: 4
 train:
   folds: [0, 1, 2, 3, 4]
-  epochs: 40
+  epochs: 7
   batch_size: 64
   lr: 1.0e-3
-  patience: 10
+  select: epoch
+  patience: 99
   ema: 0.99
   mixed_precision: "no"

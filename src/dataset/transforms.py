@@ -13,6 +13,6 @@ def build_augment(cfg: DataConfig) -> v2.Compose:
     return v2.Compose([
         v2.RandomResizedCrop((h, w), scale=tuple(cfg.crop_scale), ratio=(w / h * 0.8, w / h * 1.25), antialias=True),
         v2.RandomHorizontalFlip(cfg.hflip),
-        v2.RandomApply([v2.ColorJitter(j, j, j, 0.05)], p=0.8),
+        v2.RandomApply([v2.ColorJitter(j, j, j, cfg.hue)], p=0.8),
         v2.RandomGrayscale(cfg.grayscale),
     ])

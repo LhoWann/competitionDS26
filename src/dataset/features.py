@@ -10,22 +10,6 @@ from torch.utils.data import Dataset
 from core.config import Config
 
 
-def frame_vectors(tokens: np.ndarray, pool: str) -> np.ndarray:
-    """(N, 1 + G, D) cached float16 tokens -> (N, F) float16 frame vectors (kept compact in memory).
-
-    Args:
-        tokens: CLS token followed by G pooled patch-grid tokens per frame.
-        pool: `cls`, `cls_mean` (CLS + mean of the grid) or `grid` (all tokens concatenated).
-    """
-    if pool == "cls":
-        return tokens[:, 0]
-    if pool == "cls_mean":
-        return np.concatenate([tokens[:, 0], tokens[:, 1:].astype(np.float32).mean(1).astype(tokens.dtype)], -1)
-    if pool == "grid":
-        return tokens.reshape(len(tokens), -1)
-    raise ValueError(f"Unknown features.pool '{pool}'")
-
-
 class FeatureClipDataset(Dataset):
     """Train/val clips as (clip_len // stride, F) feature windows of cached videos, all held in memory."""
 
@@ -33,8 +17,8 @@ class FeatureClipDataset(Dataset):
         self.videos = videos.reset_index(drop=True)
         self.clip_len, self.stride = cfg.data.clip_len, cfg.features.stride
         self.window = self.clip_len // self.stride
-        root, pool = cfg.feature_dir / "train", cfg.features.pool
-        self.feats = [torch.from_numpy(frame_vectors(np.load(root / f"{v}.npy"), pool)) for v in self.videos.video_id]
+        root = cfg.feature_dir / "train"
+        self.feats = [torch.from_numpy(np.load(root / f"{v}.npy")[:, 0]) for v in self.videos.video_id]
         self.rng = np.random.default_rng()
         if train:
             self.items = [(i, -1) for i in range(len(self.videos)) for _ in range(cfg.data.clips_per_video)]
@@ -65,7 +49,7 @@ class FeatureSequenceDataset(Dataset):
     def __init__(self, cfg: Config) -> None:
         files = sorted(Path(cfg.feature_dir / "test").glob("*.npy"))
         self.ids = [p.stem for p in files]
-        self.feats = [torch.from_numpy(frame_vectors(np.load(p), cfg.features.pool)) for p in files]
+        self.feats = [torch.from_numpy(np.load(p)[:, 0]) for p in files]
 
     @property
     def dim(self) -> int:

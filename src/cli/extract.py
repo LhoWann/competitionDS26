@@ -1,6 +1,6 @@
 """Frozen-backbone feature cache for the `model.kind=features` head (needs `cli.prepare` first).
 
-Usage: python -m cli.extract --config configs/feat_dinov3_b.yaml [--workers 6]
+Usage: python -m cli.extract --config configs/feat_pose.yaml [--set features.backbone=yolo11s-pose] [--workers 4]
 """
 
 from cli import config_parser

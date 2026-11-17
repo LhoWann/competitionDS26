@@ -12,6 +12,7 @@ __pycache__/
 # competition data, caches, results and weights (never commit: FAQ 16, size)
 data/
 cache/
+cache_debug/
 outputs/
 kaggle_upload/
 *.pt

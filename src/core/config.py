@@ -26,6 +26,7 @@ class DataConfig:
     hflip: float = 0.5
     crop_scale: list[float] = field(default_factory=lambda: [0.6, 1.0])
     color_jitter: float = 0.3
+    hue: float = 0.05
     grayscale: float = 0.0
     speed_jitter: float = 0.0
     person_crop: float = 0.0
@@ -34,11 +35,9 @@ class DataConfig:
 
 @dataclass
 class FeaturesConfig:
-    backbone: str = "vit_base_patch16_dinov3.lvd1689m"
-    img_size: list[int] = field(default_factory=lambda: [224, 384])
+    backbone: str = "yolo26s-pose"
+    img_size: list[int] = field(default_factory=lambda: [360, 640])
     stride: int = 2
-    grid: list[int] = field(default_factory=lambda: [2, 4])
-    pool: str = "cls_mean"
     batch_size: int = 32
 
     @property
@@ -48,11 +47,10 @@ class FeaturesConfig:
 
 @dataclass
 class ModelConfig:
-    kind: str = "frames"
+    kind: str = "videomae"
     hidden: int = 256
-    backbone: str = "convnext_tiny.fb_in22k"
+    backbone: str = "MCG-NJU/videomae-base-finetuned-kinetics"
     pretrained: bool = True
-    drop_path: float = 0.1
     temporal_layers: int = 1
     temporal_heads: int = 8
     dropout: float = 0.2
@@ -77,6 +75,9 @@ class TrainConfig:
     grad_accum: int = 1
     max_grad_norm: float = 1.0
     patience: int = 4
+    stop_epoch: int = 0
+    eval_last: bool = False
+    resume: bool = False
     select: str = "f1_macro"
     ema: float = 0.0
     seed: int = 42
@@ -117,6 +118,9 @@ def _merge(obj: Any, values: dict[str, Any]) -> None:
         if is_dataclass(current):
             _merge(current, value)
         else:
+            # YAML 1.1 reads `3e-4` (no dot) as a string and `1` as an int: float fields always get a float.
+            if isinstance(current, float) and isinstance(value, int | str) and not isinstance(value, bool):
+                value = float(value)
             setattr(obj, key, value)
 
 
@@ -125,7 +129,8 @@ def load_config(path: str | Path | None = None, overrides: list[str] | None = No
 
     Args:
         path: YAML file whose nested keys mirror the dataclass sections.
-        overrides: Strings like `train.epochs=2`; values are parsed as YAML scalars/lists.
+        overrides: Strings like `train.epochs=2`; values are parsed as YAML scalars/lists, with only true/false as
+            booleans (YAML 1.2), so `train.mixed_precision=no` stays the string "no".
     """
     cfg = Config()
     if path is not None:
@@ -137,6 +142,7 @@ def load_config(path: str | Path | None = None, overrides: list[str] | None = No
         *parents, leaf = dotted.split(".")
         for p in parents:
             node = node.setdefault(p, {})
-        node[leaf] = yaml.safe_load(raw)
+        value = yaml.safe_load(raw)
+        node[leaf] = raw if isinstance(value, bool) and raw.lower() not in ("true", "false") else value
         _merge(cfg, nested)
     return cfg

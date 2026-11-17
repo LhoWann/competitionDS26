@@ -1,5 +1,5 @@
-"""Clip classifiers -> 8 behavior logits: end-to-end timm frame backbone, VideoMAE or V-JEPA 2 video transformer, or a
-head over cached frozen features."""
+"""Clip classifiers -> 8 behavior logits: VideoMAE or V-JEPA 2 video transformer, or a head over cached frozen pose
+vectors."""
 
 
 import timm
@@ -9,34 +9,6 @@ from transformers import VideoMAEConfig, VideoMAEModel, VJEPA2Config, VJEPA2ForV
 
 from core.config import ModelConfig
 from dataset.labels import BEHAVIORS, CHEAT_IDS
-
-
-class ClipClassifier(nn.Module):
-    """Takes uint8 clips (B, T, 3, H, W); normalization runs on-device so loaders ship compact uint8 tensors."""
-
-    def __init__(self, cfg: ModelConfig, num_frames: int, img_size: list[int]) -> None:
-        super().__init__()
-        self.backbone = timm.create_model(cfg.backbone, pretrained=cfg.pretrained, num_classes=0,
-                                          drop_path_rate=cfg.drop_path)
-        if hasattr(self.backbone, "set_input_size"):
-            self.backbone.set_input_size(img_size=tuple(img_size))
-        self.backbone.set_grad_checkpointing(cfg.grad_checkpointing)
-        data_cfg = timm.data.resolve_data_config({}, model=self.backbone)
-        self.register_buffer("mean", torch.tensor(data_cfg["mean"]).view(1, 3, 1, 1) * 255, persistent=False)
-        self.register_buffer("std", torch.tensor(data_cfg["std"]).view(1, 3, 1, 1) * 255, persistent=False)
-        dim = self.backbone.num_features
-        self.pos = nn.Parameter(torch.zeros(1, num_frames, dim))
-        nn.init.trunc_normal_(self.pos, std=0.02)
-        self.temporal = temporal_encoder(dim, cfg)
-        self.norm = nn.LayerNorm(dim)
-        self.head = nn.Sequential(nn.Dropout(cfg.dropout), nn.Linear(dim, len(BEHAVIORS)))
-
-    def forward(self, pixels: torch.Tensor) -> torch.Tensor:
-        b, t = pixels.shape[:2]
-        x = (pixels.flatten(0, 1).float() - self.mean) / self.std
-        feats = self.backbone(x).view(b, t, -1)
-        feats = self.temporal(feats + self.pos)
-        return self.head(self.norm(feats.mean(1)))
 
 
 class VideoMAEClassifier(nn.Module):
@@ -60,9 +32,12 @@ class VideoMAEClassifier(nn.Module):
         self.norm = nn.LayerNorm(dim)
         self.head = nn.Sequential(nn.Dropout(cfg.dropout), nn.Linear(dim, len(BEHAVIORS)))
 
+    def tokens(self, pixels: torch.Tensor) -> torch.Tensor:
+        """(B, T, 3, H, W) clips -> last-layer tubelet tokens (B, T / tubelet * H / patch * W / patch, dim)."""
+        return self.backbone(pixel_values=(pixels.float() - self.mean) / self.std).last_hidden_state
+
     def forward(self, pixels: torch.Tensor) -> torch.Tensor:
-        tokens = self.backbone(pixel_values=(pixels.float() - self.mean) / self.std).last_hidden_state
-        return self.head(self.norm(tokens.mean(1)))
+        return self.head(self.norm(self.tokens(pixels).mean(1)))
 
 
 class VJEPA2Classifier(nn.Module):

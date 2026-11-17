@@ -3,7 +3,7 @@
 Test JPEGs are 640x360, libjpeg quality 95, 4:2:0, no ffmpeg comment marker, i.e. `cv2.VideoCapture` ->
 `cv2.resize` -> `cv2.imwrite`. Train videos go through the same steps so both splits share one domain.
 
-CLI: python -m cli.prepare --config configs/base.yaml [--set data.max_subjects=4]
+CLI: python -m cli.prepare --config configs/debug.yaml [--set data.max_subjects=4]
 """
 
 from concurrent.futures import ProcessPoolExecutor

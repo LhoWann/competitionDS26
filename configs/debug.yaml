@@ -1,16 +1,19 @@
-# Laptop smoke run (RTX 3050 4GB): few subjects, small backbone, one fold, two epochs.
+# Laptop smoke run (RTX 3050 4GB): VideoMAE-B on full frames of a few subjects, one fold, one epoch; checks the
+# whole prepare -> train -> predict path before a long Colab run.
 name: debug
+paths:
+  cache_dir: cache_debug  # own cache: its 3-fold, 6-subject videos.csv must never replace the real one
 data:
   max_subjects: 6
   n_folds: 3
   num_frames: 8
-  img_size: [160, 288]
+  img_size: [112, 112]
   clips_per_video: 4
   num_workers: 2
 model:
-  backbone: convnext_nano.in12k_ft_in1k
+  kind: videomae
 train:
   folds: [0]
-  epochs: 2
-  batch_size: 4
+  epochs: 1
+  batch_size: 2
   patience: 2
