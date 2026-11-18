@@ -1,11 +1,11 @@
-"""Colab CLI job, step 1 (idempotent): code from /content/up, competition data from the Kaggle API, frame cache, YOLO11s
-person-box cache. Run by colab/run_job.sh through `colab exec`."""
+"""Colab CLI job, step 1 (idempotent): uploaded code (/content/code.tgz), competition data from the Kaggle API, frame
+cache, YOLO11s person-box cache. Run by colab/run_job.sh through `colab exec`."""
 import os
 import subprocess
 from pathlib import Path
 
-UP = "/content/up"
-os.environ["KAGGLE_CONFIG_DIR"] = f"{UP}/secrets"
+UP = "/content"  # run_job.sh uploads code.tgz, pose_cache.tgz and kaggle.json here
+os.environ["KAGGLE_CONFIG_DIR"] = UP
 os.environ["PYTHONPATH"] = "/content/src"
 
 

@@ -1,6 +1,6 @@
 """Writes the per-video action onsets (`dataset.onsets`) used as `data.onsets`.
 
-Usage: python -m cli.onsets --oof outputs/ens_vjs2f_vms2f_pose26/oof.csv --out configs/onsets.csv
+Usage: python -m cli.onsets --oof outputs/stack_win/oof.csv --out configs/onsets.csv
 """
 
 import argparse

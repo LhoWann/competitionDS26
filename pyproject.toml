@@ -19,6 +19,7 @@ ignore = ["W292"]
 "tests/*" = ["S101"]
 "notebooks/*" = ["E402"]
 "colab/*" = ["S602", "S603", "S607"]  # fixed shell commands on the rented Colab VM
+"kaggle/*" = ["S602"]  # fixed shell commands in the Kaggle kernel
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

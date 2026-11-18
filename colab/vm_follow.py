@@ -1,7 +1,6 @@
 """Colab CLI job, step 3: keeps the kernel busy (Colab keeps a VM alive while its kernel works) and prints stage and
-epoch lines until the queue exits, then packs the outputs: /content/results.tgz without checkpoints and, with $CKPT=1,
-/content/ckpt.tar with every fold checkpoint. Safe to rerun after a dropped connection."""
-import os
+epoch lines until the queue exits, then packs the outputs without checkpoints into /content/results.tgz. Safe to rerun
+after a dropped connection."""
 import re
 import subprocess
 import time
@@ -21,6 +20,4 @@ while True:
     time.sleep(60)
 exits = re.findall(r"=== queue exit (\d+) ===", LOG.read_text(errors="replace"))
 subprocess.run("tar --exclude=best.pt -czf /content/results.tgz -C /content outputs", shell=True, check=True)
-if os.environ.get("CKPT") == "1":
-    subprocess.run("cd /content && find outputs -name best.pt | tar -cf /content/ckpt.tar -T -", shell=True, check=True)
 print(f"QUEUE EXIT {exits[-1] if exits else '?'}", flush=True)

@@ -4,7 +4,9 @@ Input: potongan video **1 detik** (30 frame) seorang peserta ujian. Output: **0 
 atau **1 = curang**. Metrik: **F1-macro** (rata-rata F1 kelas normal dan kelas curang).
 
 Submission terbaik: **public LB 0.8764** (#7, `outputs/stack_win`): V-JEPA 2 + VideoMAE + head pose, dilatih dengan
-**label per jendela** (onset aksi), lalu digabung dengan **stacking logistic regression**.
+**label per jendela** (onset aksi), lalu digabung dengan **stacking logistic regression**. Resep yang sama dilatih ulang
+dengan checkpoint tersimpan (`outputs/stack_win_ckpt`, beda 4 dari 1515 klip) = kandidat final yang bisa
+diulang notebook.
 
 ## Daftar isi
 
@@ -243,7 +245,8 @@ Bootstrap per subjek: stacking lebih baik dari bobot sama +0.014 (interval 90% 0
 | 4 | V-JEPA 2 (4 epoch) + VideoMAE + pose26 | 0.7115 | label video, fold 0-2 |
 | 5 | V-JEPA 2 saja, threshold 0.5 | 0.685 | label video |
 | 6 | V-JEPA 2 + VideoMAE + pose26, 5 fold, flip | 0.7289 | label video |
-| 7 | **`stack_win`**: label per jendela + stacking, thr 0.43 | **0.8764** | **terbaik**, kandidat final (`outputs/stack_win/submission_lb_0.8764.csv`) |
+| 7 | **`stack_win`**: label per jendela + stacking, thr 0.43 | **0.8764** | **terbaik** (`outputs/stack_win/submission_lb_0.8764.csv`) |
+| 8 | `stack_win2`: label v2 (onset v2 + detik netral dibersihkan) + seed kedua + YOLO26m-pose | 0.8679 | lebih buruk dari #7 |
 
 `cli.stack` sekarang memilih threshold 0.44 dari OOF (submission #7 memakai 0.43 dari rata-rata tiga proksi); hasilnya
 hanya berbeda di 3 dari 1515 klip.
@@ -255,6 +258,12 @@ Config, kode, dan hasilnya sudah dihapus. Kalau ingin mencoba lagi, lihat riwaya
 | Ide | Hasil | Alasan dibuang |
 |---|---|---|
 | **Label per video** (semua jendela video curang = curang) | proksi F1 0.71, LB 0.729 (#6) | test berlabel per jendela (FAQ 33/41): fase netral dinilai acak (~0.5) |
+| Label v2: onset dari OOF stacking + detik pasca-onset dengan p_cheat OOF < 0.15 dianggap netral (163 detik) | proksi seri (0.8478 vs 0.8474), **LB 0.8679 vs 0.8764** (#8) | panitia tampaknya tetap melabeli detik setelah onset sebagai curang walau peserta sedang menulis di sela-sela |
+| Anotasi manual per detik dari contact sheet 1 fps | - | lirikan kepala terlalu halus untuk dinilai andal di resolusi itu |
+| Seed kedua V-JEPA 2 di stacking | nested 0.8453 vs 0.8478 | tidak menambah |
+| YOLO26m-pose (head pose lebih besar, Kaggle) | sendiri F1 +0.01; di stacking 0.8437 vs 0.8462 | tidak menambah di stacking |
+| VideoMAE crop lebar (margin 1.6, Kaggle 2xT4) | proksi F1 0.806 vs 0.823 | konteks tambahan tidak membantu |
+| V-JEPA 2 ViT-g (1B) dengan resep ViT-L | AUC OOF 0.79 vs 0.93 | underfit (2 dari 40 blok dilatih, lr dan resolusi 256 resep L); butuh resep sendiri |
 | Hanya menaikkan threshold run berlabel video ke 0.68 | proksi F1 0.79 | dikalahkan training ulang dengan label per jendela (0.84) |
 | Rata-rata geometrik bobot sama (`cli.ensemble` lama) | nested proksi 0.834 | stacking LR 0.849 |
 | Rata-rata versi polos + flip | nested 0.831 | lebih buruk dari flip saja |
@@ -287,6 +296,12 @@ Config, kode, dan hasilnya sudah dihapus. Kalau ingin mencoba lagi, lihat riwaya
   terbalik saat di-flip. Karena itu OOF dan test selalu dicatat dalam dua versi, dan versinya dipilih dari AUC OOF.
 - Public leaderboard teratas berisi skor 1.000 dan 0.95+ yang kemungkinan besar memakai struktur test (dilarang);
   notebook finalis diperiksa dan dijalankan ulang panitia.
+- **Proksi tidak bisa menilai perubahan definisi label.** Proksi tetap 7s/8s menganggap semua detik setelah onset curang,
+  jadi pembersihan "detik netral" tidak bisa terukur di sana; LB yang memutuskan (dan hasilnya negatif).
+- **Simpan checkpoint dari awal.** Dua kali checkpoint hilang (VM dibuang; unduhan 16 GB lewat CLI gagal 500).
+  Sekarang `colab/vm_save.py` meng-upload checkpoint dari VM ke dataset Kaggle privat.
+- Threshold sudah tidak kritis: F1 OOF stacking datar di threshold 0.35-0.50 (+-0.005). Rata-rata 5 fold di test
+  sedikit menekan probabilitas (rasio curang test 0.20 vs OOF 0.23), masih di zona datar.
 
 ## 6. Struktur folder
 
@@ -302,7 +317,9 @@ colab/                   job Colab lewat CLI resmi Google (dijalankan dari WSL)
   vm_setup.py            di VM: kode, data dari Kaggle API, cache frame dan kotak
   vm_start.py            di VM: antrean train + predict di latar belakang
   vm_follow.py           di VM: tampilkan progres sampai antrean selesai, bungkus hasil
+  vm_save.py             di VM: upload checkpoint tiap run ke dataset Kaggle privat dataslayer-ckpt-<run>
   login.sh               login Google sekali untuk CLI Colab
+kaggle/pose/             kernel GPU Kaggle (kaggle kernels push -p kaggle/pose): frame, pose, head pose
 src/
   core/config.py         dataclass config + override `--set section.key=value`
   dataset/
@@ -382,8 +399,10 @@ wsl -d Ubuntu-24.04 -- bash /mnt/d/DataSlayer26/colab/run_job.sh --ckpt \
 
 - `run_job.sh` membuat sesi `ds` (A100, kalau penuh L4), meng-upload kode, kotak YOLO11s, dan `kaggle.json`, lalu
   menjalankan `vm_setup.py` (data + cache frame, ~18 menit), `vm_start.py`, dan `vm_follow.py` (~58 menit untuk dua
-  model di A100). Hasil langsung diekstrak ke `outputs/<run>/`; dengan `--ckpt` juga `fold*/best.pt` (~9 GB, dibutuhkan
-  notebook final untuk prediksi ulang). VM dimatikan di akhir. Log: `~/colab_runs/<waktu>/runner.log` di WSL.
+  model di A100). Hasil (tanpa checkpoint) langsung diekstrak ke `outputs/<run>/`; dengan `--ckpt`, `vm_save.py`
+  meng-upload `fold*/best.pt` ke dataset Kaggle privat `dataslayer-ckpt-<run>` (dibutuhkan notebook final; kalau gagal,
+  VM sengaja tidak dimatikan supaya checkpoint bisa diselamatkan). Log: `~/colab_runs/<waktu>/runner.log` di WSL.
+- Exec pertama setelah sesi dibuat kadang putus: runner memanaskan kernel dulu, dan tiap langkah memakai `timeout`.
 - Selalu pakai `colab --auth=adc ...`. Cek sesi: `colab --auth=adc sessions`; matikan manual: `colab --auth=adc stop -s ds`.
   VM yang menganggur tetap memakan compute unit (`colab --auth=adc usage`).
 - Koneksi yang putus diulang otomatis (ketiga langkah aman diulang). Antrean training jalan terlepas dari kernel.
@@ -435,10 +454,9 @@ Checklist anti-kesalahan (diperiksa ulang 2026-11-18):
 
 Ide lanjutan (urut dari yang paling menjanjikan; [bukti] = didukung hasil kita, [dugaan] = belum diuji):
 
-1. [bukti] **Anotasi per detik untuk perilaku yang terputus-putus** (Repeated_Peeking dulu, lalu Reading_Hidden_Notes
-   dan Using_Smartwatch yang memudar setelah sekitar detik 12) dari contact sheet 1 frame per detik; simpan CSV dan
-   gambarnya supaya prosesnya bisa diperiksa panitia (FAQ 30, 40).
-2. [bukti] Onset putaran kedua dari OOF model berlabel jendela (kurvanya jauh lebih tajam), lalu training ulang.
-3. [dugaan] Seed kedua V-JEPA 2 (model terkuat), digabung lewat stacking.
-4. [dugaan] V-JEPA 2 dengan lebih banyak blok dilatih (`model.train_blocks=4`) dan `backbone_lr` lebih kecil.
-5. [dugaan] Pose: `yolo26m-pose`, fitur kecepatan keypoint, head GRU/TCN; fitur arah kepala untuk peeking.
+1. [bukti] **Notebook final Kaggle**: prediksi test dari dataset `dataslayer-ckpt-vjepa2-l-crop-win`,
+   `dataslayer-ckpt-videomae-b-crop-win` + head pose + `cli.stack`, harus mereproduksi submission final yang dipilih.
+2. [dugaan] V-JEPA 2 dengan lebih banyak blok dilatih (`model.train_blocks=4`) dan `backbone_lr` lebih kecil; ViT-g
+   dengan resep sendiri (lebih banyak blok, lr, 384 piksel) kalau waktu GPU cukup.
+3. [dugaan] Onset v2 saja tanpa pembersihan detik netral (#8 mencampur keduanya, jadi efek masing-masing belum terpisah).
+4. [dugaan] Fitur arah kepala dari keypoint untuk memisahkan Repeated_Peeking dari Looking_Around.

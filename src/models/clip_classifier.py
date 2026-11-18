@@ -49,6 +49,9 @@ class VJEPA2Classifier(nn.Module):
         super().__init__()
         if cfg.pretrained:
             full = VJEPA2ForVideoClassification.from_pretrained(cfg.backbone, attn_implementation="sdpa")
+        elif "vjepa2" in cfg.backbone:
+            # Checkpoint loading (cli.predict): the hub architecture of the trained backbone (ViT-L, ViT-g, ...).
+            full = VJEPA2ForVideoClassification(VJEPA2Config.from_pretrained(cfg.backbone))
         else:
             full = VJEPA2ForVideoClassification(VJEPA2Config(crop_size=img_size[0], frames_per_clip=num_frames))
         self.backbone = full.vjepa2

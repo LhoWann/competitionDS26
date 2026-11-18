@@ -3,7 +3,8 @@
 #   bash colab/run_job.sh [--ckpt] configs/colab_vjepa2_win.yaml configs/colab_videomae_win.yaml
 # Session `ds` (A100, L4 fallback) -> upload code, YOLO11s box cache, kaggle.json -> vm_setup / vm_start / vm_follow
 # (each retried only after a dropped websocket; all three are idempotent) -> outputs/<run>/ extracted into the repo
-# (with --ckpt also fold*/best.pt) -> VM stopped. Logs: ~/colab_runs/<time>/runner.log.
+# (with --ckpt the fold checkpoints go to private Kaggle datasets, vm_save.py) -> VM stopped.
+# Logs: ~/colab_runs/<time>/runner.log.
 export PATH=$HOME/.local/bin:$PATH
 C="colab --auth=adc"
 REPO=$(cd "$(dirname "$0")/.." && pwd)
@@ -15,10 +16,11 @@ R=$HOME/colab_runs/$(date +%Y%m%d_%H%M)
 mkdir -p $R
 log() { echo "=== $* $(date) ===" | tee -a $R/runner.log; }
 
+# A client whose websocket dropped can hang instead of exiting: every exec runs under `timeout` (seconds in $3).
 step() {
   for attempt in 1 2 3 4 5 6; do
     log "STEP $1 attempt $attempt"
-    $C exec -s ds --timeout 0 --env "RUNS=$RUNS" --env "CKPT=$CKPT" -f $REPO/colab/$1 > $R/$1.log 2>&1
+    timeout $3 $C exec -s ds --timeout 0 --env "RUNS=$RUNS" --env "CKPT=$CKPT" -f $REPO/colab/$1 > $R/$1.log 2>&1
     cat $R/$1.log >> $R/runner.log
     grep -q "$2" $R/$1.log && return 0
     grep -q "Connection was lost" $R/$1.log || { log "STEP $1 FAILED"; return 1; }
@@ -38,20 +40,28 @@ if ! $C status -s ds 2>/dev/null | grep -q "Hardware"; then
   [ -z "$got" ] && { log "NO GPU"; exit 1; }
   log "GOT $got"
 fi
+# The first exec after `colab new` sometimes drops: warm the kernel up until a trivial exec answers.
+for attempt in 1 2 3 4 5; do
+  echo 'print("KERNEL OK")' | timeout 120 $C exec -s ds > $R/warmup.log 2>&1
+  grep -q "KERNEL OK" $R/warmup.log && break
+  log "WARMUP attempt $attempt failed"; sleep 20
+done
+grep -q "KERNEL OK" $R/warmup.log || { log "KERNEL NOT REACHABLE"; stop_vm; exit 1; }
 tar --exclude=__pycache__ -czf $R/code.tgz -C $REPO src configs
-echo 'import os; os.makedirs("/content/up/secrets", exist_ok=True)' | $C exec -s ds >> $R/runner.log 2>&1
-$C upload -s ds $R/code.tgz /content/up/code.tgz >> $R/runner.log 2>&1
-$C upload -s ds $REPO/cache/pose_cache.tgz /content/up/pose_cache.tgz >> $R/runner.log 2>&1
-$C upload -s ds $REPO/secrets/kaggle.json /content/up/secrets/kaggle.json >> $R/runner.log 2>&1
+for f in $R/code.tgz $REPO/cache/pose_cache.tgz $REPO/secrets/kaggle.json; do
+  timeout 600 $C upload -s ds $f /content/$(basename $f) >> $R/runner.log 2>&1 ||
+    { log "UPLOAD $f FAILED"; stop_vm; exit 1; }
+done
 log "UPLOADED $RUNS"
-step vm_setup.py "SETUP DONE" || { stop_vm; exit 1; }
-step vm_start.py "queue" || { stop_vm; exit 1; }
-step vm_follow.py "QUEUE EXIT" || exit 1
+step vm_setup.py "SETUP DONE" 3600 || { stop_vm; exit 1; }
+step vm_start.py "queue" 600 || { stop_vm; exit 1; }
+step vm_follow.py "QUEUE EXIT" 21600 || exit 1
 grep -q "QUEUE EXIT 0" $R/vm_follow.py.log && log "QUEUE OK" || log "QUEUE FAILED"
 $C download -s ds /content/results.tgz $R/results.tgz >> $R/runner.log 2>&1 && tar -xzf $R/results.tgz -C $REPO &&
   log "RESULTS IN $REPO/outputs"
 if [ $CKPT = 1 ]; then
-  $C download -s ds /content/ckpt.tar $R/ckpt.tar >> $R/runner.log 2>&1 && tar -xf $R/ckpt.tar -C $REPO &&
-    rm $R/ckpt.tar && log "CHECKPOINTS IN $REPO/outputs"
+  # Checkpoints exist only on the VM: if the upload fails, leave the VM running for a manual rescue.
+  step vm_save.py "ALL SAVED" 14400 || { log "CKPT SAVE FAILED: VM LEFT RUNNING"; exit 1; }
+  log "CHECKPOINTS SAVED TO KAGGLE"
 fi
 stop_vm
