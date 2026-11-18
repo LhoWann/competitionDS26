@@ -18,6 +18,7 @@ ignore = ["W292"]
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
 "notebooks/*" = ["E402"]
+"colab/*" = ["S602", "S603", "S607"]  # fixed shell commands on the rented Colab VM
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

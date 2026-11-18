@@ -12,16 +12,17 @@ from accelerate import Accelerator
 from core.config import load_config
 from dataset.clips import SequenceDataset, VideoClipDataset, frame_indices, person_box, roi_boxes
 from dataset.features import FeatureClipDataset, FeatureSequenceDataset
-from dataset.labels import BEHAVIORS, CHEAT_IDS
+from dataset.labels import BEHAVIORS, CHEAT_IDS, IGNORE_BEHAVIOR, window_target
+from dataset.onsets import curve_onset, estimate_onsets
 from dataset.prepare import build_index, extract_video
-from evaluation.ensemble import PROB_COLS, ensemble
 from evaluation.gradcam import gradcam
 from evaluation.metrics import best_threshold, binary_metrics, evaluate_clips
+from evaluation.stack import stack
 from features.extract import extract
 from features.pose import POSE_DIM, pose_vector
 from inference.predict import predict
 from models.clip_classifier import cheat_log_probs
-from training.cv import pending_folds, run, summarize
+from training.cv import load_videos, pending_folds, run, summarize
 from training.engine import build_model, predictions_frame, train_fold
 from training.losses import clip_loss
 from training.optim import build_optimizer, cosine_schedule
@@ -99,6 +100,47 @@ def test_clip_datasets(fake_cache, tmp_path):
         cv2.imwrite(str(seq / f"{i + 1:02d}.jpg"), np.zeros((36, 64, 3), np.uint8))
     te = SequenceDataset(tmp_path / "test", cfg.data)
     assert te.ids == ["test_seq_00001"] and te[0]["inputs"].shape == (4, 3, 64, 96)
+
+
+def test_window_labels_before_onset(fake_cache, tmp_path):
+    frames_dir, videos = fake_cache
+    cfg = tiny_cfg()
+    cheat = videos.assign(onset=30)[videos.label == 1].reset_index(drop=True)
+    va = VideoClipDataset(cheat, frames_dir, cfg.data, train=False)
+    assert [(va[i]["start"], va[i]["label"], va[i]["behavior"]) for i in range(2)] == [
+        (0, 0, IGNORE_BEHAVIOR), (30, 1, cheat.behavior_id[0])]
+    assert window_target(cheat.iloc[0], 20, 30) == (cheat.behavior_id[0], 1)
+    assert window_target(videos.iloc[0], 0, 30) == (videos.behavior_id[0], videos.label[0])
+    pd.DataFrame({"video_id": videos.video_id, "onset": 30}).to_csv(tmp_path / "onsets.csv", index=False)
+    videos.to_csv(tmp_path / "videos.csv", index=False)
+    cfg = tiny_cfg(f"paths.cache_dir={tmp_path.as_posix()}", f"data.onsets={(tmp_path / 'onsets.csv').as_posix()}")
+    assert load_videos(cfg).onset.tolist() == [30] * 4
+    pd.DataFrame({"video_id": videos.video_id[:2], "onset": 30}).to_csv(tmp_path / "onsets.csv", index=False)
+    with pytest.raises(ValueError, match="no onset"):
+        load_videos(cfg)
+
+
+def test_clip_loss_skips_missing_behavior():
+    cfg = tiny_cfg()
+    logits = torch.randn(3, len(BEHAVIORS), requires_grad=True)
+    beh, lab = torch.tensor([IGNORE_BEHAVIOR, 5, IGNORE_BEHAVIOR]), torch.tensor([0, 1, 0])
+    loss = clip_loss(logits, beh, lab, cfg.train)
+    loss.backward()
+    assert torch.isfinite(loss) and logits.grad[0].abs().sum() > 0
+    all_missing = clip_loss(logits, torch.full((3,), IGNORE_BEHAVIOR), lab, cfg.train)
+    assert torch.isfinite(all_missing)
+
+
+def test_estimate_onsets():
+    rows = []
+    curves = {"s1_front_a": [0.5] * 7 + [0.9] * 9, "s1_side_a": [0.5] * 16, "s2_front_b": [0.5] * 9 + [0.95] * 7,
+              "s3_front_c": [0.4] * 16}
+    for vid, curve in curves.items():
+        rows += [{"video_id": vid, "start": 30 * s, "label": int(vid != "s3_front_c"), "p_cheat": p}
+                 for s, p in enumerate(curve)]
+    onsets = estimate_onsets(pd.DataFrame(rows)).set_index("video_id").onset.to_dict()
+    assert curve_onset(np.array(curves["s1_front_a"])) == (7, pytest.approx(0.4))
+    assert onsets == {"s1_front_a": 210, "s1_side_a": 210, "s2_front_b": 270, "s3_front_c": 240}
 
 
 @pytest.mark.parametrize("opt", ["adamw", "muon"])
@@ -206,7 +248,7 @@ def test_person_box_crop(tmp_path):
     crop = SequenceDataset(tmp_path / "test", cfg.data, tmp_path / "crop")[0]["inputs"]
     assert crop.shape == full.shape == (4, 3, 32, 32) and full.float().mean() > 100 > 20 > crop.float().mean()
 
-def test_ensemble_picks_informative_run(tmp_path):
+def test_stack_trusts_informative_run(tmp_path):
     rng = np.random.default_rng(0)
     beh = np.repeat(np.arange(8), 20)
     good = np.full((160, 8), 0.02)
@@ -215,25 +257,24 @@ def test_ensemble_picks_informative_run(tmp_path):
     for name, probs in (("good", good), ("noise", rng.dirichlet(np.ones(8), 160))):
         d = tmp_path / name
         d.mkdir()
-        cols = pd.DataFrame(probs, columns=PROB_COLS)
+        cols = pd.DataFrame(probs, columns=[f"p_beh{i}" for i in range(8)])
         cols.assign(video_id=[f"v{i // 4}" for i in range(160)], start=np.arange(160) % 4 * 30, behavior=beh,
-                    label=(beh >= 4).astype(int), video=[f"v{i // 4}" for i in range(160)],
-                    pred_behavior=probs.argmax(1), p_cheat=probs[:, 4:].sum(1)).to_csv(d / "oof.csv", index=False)
-        cols.assign(id=[f"t{i:03d}" for i in range(160)]).to_csv(d / "test_probs.csv", index=False)
+                    label=(beh >= 4).astype(int), pred_behavior=probs.argmax(1),
+                    p_cheat=probs[:, 4:].sum(1)).to_csv(d / "oof.csv", index=False)
+        cols.assign(id=[f"t{i:03d}" for i in range(160)], p_cheat=probs[:, 4:].sum(1)).to_csv(d / "test_probs.csv",
+                                                                                              index=False)
         runs.append(d)
-    cv = ensemble(runs, tmp_path / "ens", step=0.5)
-    assert cv["weights"]["good"] >= 0.5 and cv["f1_best"] == 1.0 and cv["n_clips"] == 160
-    oof = pd.read_csv(runs[1] / "oof.csv")
-    oof.iloc[:80].to_csv(runs[1] / "oof.csv", index=False)
-    assert ensemble(runs, tmp_path / "ens2", step=0.5)["n_clips"] == 80
-    assert ensemble(runs, tmp_path / "ens3", weights=[0.5, 0.5])["weights"] == {"good": 0.5, "noise": 0.5}
+    cv = stack(runs, tmp_path / "st")
+    assert cv["coef"]["good"] > abs(cv["coef"]["noise"]) and cv["f1_best"] == 1.0 and cv["n_clips"] == 160
+    assert pd.read_csv(tmp_path / "st" / "submission.csv").label.tolist() == (beh >= 4).astype(int).tolist()
+    pd.read_csv(runs[1] / "oof.csv").iloc[::2].to_csv(runs[1] / "oof.csv", index=False)
     for name in ("oof", "test_probs"):
         (runs[0] / f"{name}_flip.csv").write_bytes((runs[0] / f"{name}.csv").read_bytes())
-    cv = ensemble([Path(f"{runs[0]}@flip"), runs[1]], tmp_path / "ens4", weights=[1.0, 0.0])
-    assert cv["weights"] == {"good_flip": 1.0, "noise": 0.0} and cv["n_clips"] == 80
+    cv = stack([Path(f"{runs[0]}@flip"), runs[1]], tmp_path / "st2")
+    assert set(cv["coef"]) == {"good_flip", "noise"} and cv["n_clips"] == 80
     with pytest.raises(ValueError):
-        ensemble([Path(f"{runs[0]}@nope")], tmp_path / "ens5")
-    assert pd.read_csv(tmp_path / "ens" / "submission.csv").label.tolist() == (beh >= 4).astype(int).tolist()
+        stack([Path(f"{runs[0]}@nope")], tmp_path / "st3")
+
 
 def test_build_index_folds_are_subject_disjoint(tmp_path):
     for s in range(7):

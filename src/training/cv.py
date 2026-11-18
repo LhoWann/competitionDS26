@@ -56,9 +56,20 @@ def pending_folds(cfg: Config) -> list[int]:
     return [f for f in cfg.train.folds if not (cfg.train.resume and f in done)]
 
 
+def load_videos(cfg: Config) -> pd.DataFrame:
+    """The train videos table, with each video's action `onset` frame when `data.onsets` is set."""
+    videos = pd.read_csv(Path(cfg.paths.cache_dir) / "videos.csv")
+    if not cfg.data.onsets:
+        return videos
+    videos = videos.merge(pd.read_csv(cfg.data.onsets), on="video_id", how="left")
+    if videos.onset.isna().any():
+        raise ValueError(f"{cfg.data.onsets} has no onset for {videos.video_id[videos.onset.isna()].tolist()[:5]}")
+    return videos
+
+
 def run(cfg: Config) -> dict[str, float] | None:
     acc = Accelerator(mixed_precision=cfg.train.mixed_precision, gradient_accumulation_steps=cfg.train.grad_accum)
-    videos = pd.read_csv(Path(cfg.paths.cache_dir) / "videos.csv")
+    videos = load_videos(cfg)
     folds = pending_folds(cfg)
     if folds != list(cfg.train.folds):
         acc.print(f"resume: folds {sorted(set(cfg.train.folds) - set(folds))} already finished, training {folds}")

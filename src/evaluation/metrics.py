@@ -22,11 +22,13 @@ def best_threshold(p_cheat: np.ndarray, y: np.ndarray) -> tuple[float, float]:
 
 
 def evaluate_clips(df: pd.DataFrame) -> dict[str, float]:
-    """Clip-level metrics plus video-level F1 (mean clip probability per video), from columns
-    `p_cheat`, `label`, `behavior`, `pred_behavior`, `video`."""
+    """Clip-level metrics plus video-level F1 (mean clip probability per video; a video is cheat if any window is),
+    from columns `p_cheat`, `label`, `behavior`, `pred_behavior`, `video`. Behavior accuracy skips windows without a
+    behavior target."""
     out = binary_metrics(df.p_cheat.to_numpy(), df.label.to_numpy())
     out["thr"], out["f1_best"] = best_threshold(df.p_cheat.to_numpy(), df.label.to_numpy())
-    out["beh_acc"] = float((df.behavior == df.pred_behavior).mean())
-    vid = df.groupby("video").agg(p_cheat=("p_cheat", "mean"), label=("label", "first"))
+    has_beh = df.behavior >= 0
+    out["beh_acc"] = float((df.behavior[has_beh] == df.pred_behavior[has_beh]).mean())
+    vid = df.groupby("video").agg(p_cheat=("p_cheat", "mean"), label=("label", "max"))
     out["vid_f1"] = binary_metrics(vid.p_cheat.to_numpy(), vid.label.to_numpy())["f1_macro"]
     return out

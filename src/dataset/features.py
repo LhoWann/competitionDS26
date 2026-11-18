@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import Dataset
 
 from core.config import Config
+from dataset.labels import window_target
 
 
 class FeatureClipDataset(Dataset):
@@ -39,8 +40,9 @@ class FeatureClipDataset(Dataset):
         if start < 0:
             start = int(self.rng.integers(0, row.n_frames - self.clip_len + 1))
         i0 = start // self.stride
-        return {"inputs": self.feats[vi][i0:i0 + self.window], "behavior": int(row.behavior_id),
-                "label": int(row.label), "video": vi, "start": start}
+        behavior, label = window_target(row, start, self.clip_len)
+        return {"inputs": self.feats[vi][i0:i0 + self.window], "behavior": behavior, "label": label, "video": vi,
+                "start": start}
 
 
 class FeatureSequenceDataset(Dataset):

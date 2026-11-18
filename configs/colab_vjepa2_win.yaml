@@ -1,0 +1,39 @@
+# Window labels (FAQ 33/41: a test sequence is labeled by the behavior visible in it): same recipe as the
+# video-label run (stop_epoch 2 of the schedule), but windows before each video's action onset
+# (configs/onsets.csv from cli.onsets) are normal with no behavior target.
+# Run by the Colab CLI job (colab/run_job.sh): data from the Kaggle API, outputs on the VM disk.
+name: vjepa2_l_crop_win
+paths:
+  data_dir: /content/data
+  cache_dir: /content/cache
+  output_dir: /content/outputs
+data:
+  num_frames: 16
+  img_size: [256, 256]
+  clips_per_video: 16
+  num_workers: 12
+  crop_scale: [0.7, 1.0]
+  hue: 0.0
+  speed_jitter: 0.2
+  grayscale: 0.1
+  person_crop: 1.15
+  onsets: configs/onsets.csv
+model:
+  kind: vjepa2
+  backbone: facebook/vjepa2-vitl-fpc16-256-ssv2
+  dropout: 0.3
+  train_blocks: 2
+train:
+  folds: [0, 1, 2, 3, 4]
+  epochs: 4
+  stop_epoch: 2
+  eval_last: true  # epoch fixed: skip the unused epoch-1 validation and checkpoint
+  resume: true  # after a VM restart, skip folds that already have oof.csv + best.pt
+  batch_size: 48
+  lr: 1.5e-4
+  backbone_lr: 1.5e-5
+  optimizer: adamw
+  ema: 0.995
+  select: epoch
+  patience: 99
+  mixed_precision: bf16

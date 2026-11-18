@@ -2,7 +2,7 @@
 
 Usage:
     python -m cli.predict --config configs/debug.yaml
-    accelerate launch --multi_gpu --num_processes 2 -m cli.predict --config configs/colab_videomae.yaml
+    accelerate launch --multi_gpu --num_processes 2 -m cli.predict --config configs/colab_videomae_win.yaml
 """
 
 from cli import config_parser

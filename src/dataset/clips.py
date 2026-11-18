@@ -9,6 +9,7 @@ import torch
 from torch.utils.data import Dataset
 
 from core.config import DataConfig
+from dataset.labels import window_target
 from dataset.transforms import build_augment
 
 
@@ -130,8 +131,9 @@ class VideoClipDataset(Dataset):
         ids = frame_indices(start, length, self.cfg.num_frames, self.train, self.rng)
         paths = [self.frames_dir / row.video_id / f"{i:05d}.jpg" for i in ids]
         clip = load_clip(paths, self.clip_poses(vi, start, length), self.cfg)
-        return {"inputs": clip if self.augment is None else self.augment(clip), "behavior": int(row.behavior_id),
-                "label": int(row.label), "video": vi, "start": start}
+        behavior, label = window_target(row, start, length)
+        return {"inputs": clip if self.augment is None else self.augment(clip), "behavior": behavior, "label": label,
+                "video": vi, "start": start}
 
 
 def seed_worker(worker_id: int) -> None:

@@ -31,6 +31,7 @@ class DataConfig:
     speed_jitter: float = 0.0
     person_crop: float = 0.0
     crop_features: str = "yolo11s-pose_360x640_s2"
+    onsets: str = ""  # CSV video_id,onset (frame where the action starts; `cli.onsets`): enables window labels
 
 
 @dataclass

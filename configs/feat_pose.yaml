@@ -1,10 +1,12 @@
 # Laptop: frozen YOLO26s-pose keypoints (COCO weights, cli.extract at native 640x360) + small temporal head. Keypoints
 # are box-relative, so they carry body motion but not clothes, face or camera colour (the subject shift). Fixed 7
-# epochs = the fold-mean peak (honest OOF F1 0.613, AUC 0.660). The person-crop boxes of the video models come from the
-# YOLO11s cache instead: `cli.extract --config configs/feat_pose.yaml --set features.backbone=yolo11s-pose`.
-name: feat_pose_y26s_fix
+# epochs = the fold-mean peak. Window labels (configs/onsets.csv): OOF AUC 0.810 on window labels vs 0.775 for the
+# video-label head. The person-crop boxes of the video models come from the YOLO11s cache instead:
+# `cli.extract --config configs/feat_pose.yaml --set features.backbone=yolo11s-pose`.
+name: feat_pose_y26s_win
 data:
   num_workers: 0
+  onsets: configs/onsets.csv
 features:
   backbone: yolo26s-pose
   img_size: [360, 640]
