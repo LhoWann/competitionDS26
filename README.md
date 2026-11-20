@@ -4,9 +4,17 @@ Input: potongan video **1 detik** (30 frame) seorang peserta ujian. Output: **0 
 atau **1 = curang**. Metrik: **F1-macro** (rata-rata F1 kelas normal dan kelas curang).
 
 Submission terbaik: **public LB 0.8764** (#7, `outputs/stack_win`): V-JEPA 2 + VideoMAE + head pose, dilatih dengan
-**label per jendela** (onset aksi), lalu digabung dengan **stacking logistic regression**. Resep yang sama dilatih ulang
-dengan checkpoint tersimpan (`outputs/stack_win_ckpt`, beda 4 dari 1515 klip) = kandidat final yang bisa
-diulang notebook.
+**label per jendela** (onset aksi), lalu digabung dengan **stacking logistic regression**.
+
+**Dua pilihan final** (keduanya dibuat ulang oleh notebook Kaggle `kaggle/final/`, lihat [5.3](#53-submission-public-leaderboard)):
+
+| Pilihan | Isi | Public LB | Nested CV | Berkas di notebook |
+|---|---|---|---|---|
+| **#7** | V-JEPA 2 + VideoMAE + head pose, threshold OOF 0.44 | **0.8764** | 0.849 | `submission.csv` |
+| **#13** | #7 + V-JEPA 2 LoRA16 + V-JEPA 2 LoRA16-MLP 4 epoch, threshold tetap 0.43 | 0.8738 | **0.865** | `submission_lora.csv` |
+
+#7 = skor public terbaik; #13 = skor validasi jujur terbaik (bootstrap per subjek: lebih baik dari stack tanpa
+LoRA-MLP dengan interval 95% [+0.002, +0.016]). Memilih keduanya melindungi dari acaknya 30% public LB.
 
 ## Daftar isi
 
@@ -117,7 +125,7 @@ flowchart TD
     B --> ON[configs/onsets.csv<br>onset aksi per video, cli.onsets]
     ON --> L[Label per jendela:<br>sebelum onset = normal]
     X -->|kotak YOLO11s| C[Crop orang per klip]
-    C --> M1[V-JEPA 2 ViT-L<br>Colab A100]
+    C --> M1[V-JEPA 2 ViT-L<br>+ 2 varian LoRA<br>Colab A100]
     C --> M2[VideoMAE-B<br>Colab A100]
     X -->|keypoint YOLO26s| M3[Head pose kecil<br>laptop]
     L --> M1
@@ -126,7 +134,7 @@ flowchart TD
     M1 --> O[OOF per klip + test_probs.csv]
     M2 --> O
     M3 --> O
-    O --> E[cli.stack<br>logistic regression di atas logit 3 model<br>threshold dari OOF]
+    O --> E[cli.stack<br>logistic regression di atas logit 3 / 5 model<br>threshold OOF / tetap 0.43]
     E --> S[submission.csv]
 ```
 
@@ -177,8 +185,13 @@ flowchart LR
 - Crop di sekitar badan memperbesar tangan dan jam sekitar 1.5x. Kotaknya dihitung dari klip itu sendiri.
 - **VideoMAE-B** (Kinetics-400): semua lapisan ikut di-fine-tune.
 - **V-JEPA 2 ViT-L** (Something-Something v2, gerakan tangan dan benda): encoder dibekukan kecuali 2 blok terakhir.
-- Loss = cross-entropy 8 perilaku + loss biner pada peluang curang. Keduanya dilatih **2 epoch** dari jadwal lr yang
-  lebih panjang (`train.stop_epoch=2`, puncak rata-rata antar fold).
+- **V-JEPA 2 + LoRA** (Hu et al. 2021, arXiv 2106.09685; `model.lora_rank`, `models/clip_classifier.py:LoRALinear`):
+  encoder beku, tiap linear layer mendapat tambahan low-rank `B(A(x))` rank 16 yang dilatih (lr = lr head).
+  - `colab_vjepa2_lora16_win.yaml`: LoRA di query/key/value ke-24 blok, 2 epoch.
+  - `colab_vjepa2_lora16mlp_e4_win.yaml`: juga di proyeksi output attention dan kedua lapisan MLP (`model.lora_mlp`),
+    jadwal penuh 4 epoch.
+- Loss = cross-entropy 8 perilaku + loss biner pada peluang curang. Model tanpa LoRA dilatih **2 epoch** dari jadwal lr
+  yang lebih panjang (`train.stop_epoch=2`, puncak rata-rata antar fold).
 - Validasi dan test menghitung versi tanpa flip dan dengan flip TTA (`oof.csv` / `oof_flip.csv`). Versi yang dipakai
   dipilih dari AUC OOF (kedua model: flip menang tipis).
 
@@ -199,7 +212,12 @@ dilatih di laptop.
 
 `cli.stack` (`evaluation/stack.py`): fitur = logit `p_cheat` tiap model untuk satu klip; logistic regression dilatih di
 OOF gabungan (label per jendela), lalu dipakai apa adanya untuk tiap klip test sendiri-sendiri. Threshold = F1 terbaik
-di OOF hasil stacking. Bobot yang dipelajari sekarang: V-JEPA 2 0.92, VideoMAE 0.51, pose 0.27 (intercept -0.19).
+di OOF hasil stacking. Bobot #7: V-JEPA 2 0.92, VideoMAE 0.51, pose 0.27 (intercept -0.19).
+
+**Threshold untuk stack baru: tetap 0.43.** Kurva F1 OOF semua stack datar di 0.40-0.55, jadi "F1 terbaik di OOF"
+melompat acak di dalam rentang itu (stack #13 memilih 0.53). Di test pilihan itu menentukan puluhan klip: stack yang
+sama mendapat public 0.8536 di 0.53 (#11) dan 0.8738 di 0.43 (#13). 0.43 = threshold OOF #7/#9; di stack #13 F1
+nested proksi pada 0.43 hanya 0.0015 di bawah puncaknya (0.865/0.867 vs 0.865/0.870).
 
 ## 5. Hasil sejauh ini
 
@@ -221,19 +239,25 @@ OOF 5 fold, 6456 klip (`outputs/<run>/cv.json`, label per jendela dari tabel ons
 | `feat_pose_y26s_win` (`feat_pose.yaml`, laptop) | YOLO26s-pose beku + head, 7 epoch | 0.734 | 0.810 |
 | `videomae_b_crop_win@flip` (`colab_videomae_win.yaml`) | VideoMAE-B, crop 224, 16 frame | 0.829 | 0.915 |
 | `vjepa2_l_crop_win@flip` (`colab_vjepa2_win.yaml`) | V-JEPA 2 ViT-L, 2 blok dilatih, crop 256 | 0.850 | 0.931 |
-| **`stack_win`** (`cli.stack`) | stacking 3 model di atas | **0.867** | **0.939** |
+| `vjepa2_l_lora16_crop_win@flip` (`colab_vjepa2_lora16_win.yaml`) | V-JEPA 2 + LoRA16 q/k/v, 2 epoch | 0.870 | 0.940 |
+| `vjepa2_l_lora16mlp_e4_crop_win@flip` (`colab_vjepa2_lora16mlp_e4_win.yaml`) | V-JEPA 2 + LoRA16 attention + MLP, 4 epoch | 0.878 | 0.942 |
+| **`stack_win`** (`cli.stack`, #7) | stacking 3 model tanpa LoRA | 0.867 | 0.939 |
+| **`stack_best3`** (`cli.stack`, #13) | stacking 5 model | **0.886** | **0.949** |
 
-`stack_win` di atas dinilai di OOF yang juga dipakai untuk melatih stacking (sedikit optimistis). Angka jujurnya dari
-nested CV per fold subjek (stacking dan threshold dipilih di 4 fold, dinilai di fold ke-5), rata-rata proksi 7s/8s:
+Angka stack di atas dinilai di OOF yang juga dipakai untuk melatih stacking (optimistis). Angka jujurnya dari nested CV
+per fold subjek (stacking dan threshold dipilih di 4 fold, dinilai di fold ke-5), rata-rata proksi 7s/8s:
 
 | Penggabungan | F1 nested |
 |---|---|
-| **Stacking LR di atas 3 logit** (dipakai) | **0.849** |
-| Bobot dicari di grid | 0.847 |
-| Rata-rata geometrik bobot sama | 0.834 |
+| **#13: 3 model + LoRA16 + LoRA16-MLP 4 epoch** | **0.865** |
+| #9: 3 model + LoRA16 | 0.856 |
+| **#7: stacking LR di atas 3 logit** | 0.849 |
+| Bobot dicari di grid (3 model) | 0.847 |
+| Rata-rata geometrik bobot sama (3 model) | 0.834 |
 | V-JEPA 2 saja | 0.827 |
 
-Bootstrap per subjek: stacking lebih baik dari bobot sama +0.014 (interval 90% 0.004-0.025).
+Bootstrap per subjek: stacking lebih baik dari bobot sama +0.014 (interval 90% 0.004-0.025); #13 lebih baik dari #9
++0.009 (interval 95% +0.002-0.016, naik di 3 dari 5 fold, stabil untuk C = 0.1 / 1 / 10).
 
 ### 5.3 Submission (public leaderboard)
 
@@ -247,9 +271,14 @@ Bootstrap per subjek: stacking lebih baik dari bobot sama +0.014 (interval 90% 0
 | 6 | V-JEPA 2 + VideoMAE + pose26, 5 fold, flip | 0.7289 | label video |
 | 7 | **`stack_win`**: label per jendela + stacking, thr 0.43 | **0.8764** | **terbaik** (`outputs/stack_win/submission_lb_0.8764.csv`) |
 | 8 | `stack_win2`: label v2 (onset v2 + detik netral dibersihkan) + seed kedua + YOLO26m-pose | 0.8679 | lebih buruk dari #7 |
+| 9 | `stack_best`: #7 + V-JEPA 2 LoRA16, thr 0.43 | 0.8738 | nested 0.856 |
+| 10 | `stack_best2`: #9 + LoRA16-MLP dengan onset v2, thr 0.52 | 0.8604 | onset v2 merugikan (kedua kalinya) |
+| 11 | `stack_best3`: #9 + LoRA16-MLP 4 epoch, thr OOF 0.53 | 0.8536 | threshold terlalu tinggi: membuang 31 klip curang #7 |
+| 12 | #7 dengan thr 0.38 (+12 klip curang) | 0.8745 | menurunkan threshold #7 tidak membantu |
+| 13 | **`stack_best3_t043`**: stack #11 dengan thr tetap 0.43 | **0.8738** | **pilihan final kedua** (nested 0.865) |
 
-`cli.stack` sekarang memilih threshold 0.44 dari OOF (submission #7 memakai 0.43 dari rata-rata tiga proksi); hasilnya
-hanya berbeda di 3 dari 1515 klip.
+Submission teman setim tidak tercantum. `cli.stack` sekarang memilih threshold 0.44 dari OOF untuk #7 (submission #7
+memakai 0.43 dari rata-rata tiga proksi); hasilnya hanya berbeda di 3 dari 1515 klip.
 
 ### 5.4 Sudah dicoba lalu dibuang
 
@@ -277,6 +306,14 @@ Config, kode, dan hasilnya sudah dihapus. Kalau ingin mencoba lagi, lihat riwaya
 | V-JEPA 2 8 epoch | puncak epoch 3-4 lalu overfit | diganti `stop_epoch=2` |
 | Threshold terpisah kamera depan/samping | F1 0.6706 vs 0.6722 global | tidak membantu |
 | Rekonstruksi struktur test / normalisasi per kelompok subjek | public 0.656 | dilarang FAQ 27/35 |
+| Onset v2 saja (tanpa pembersihan detik netral), di LoRA16-MLP | proksi 0.856/0.855 vs 0.860/0.860; LB #10 0.8604 | dua submission dengan onset v2 sama-sama turun |
+| V-JEPA 2 dengan 4 blok dilatih (`train_blocks=4`, Kaggle 2xT4) | AUC 0.931 = 2 blok | tidak menambah |
+| Surgical fine-tuning (Lee et al. 2022, arXiv 2210.11466): embedding + 2 blok awal ikut dilatih | proksi 0.839/0.837 | kalah dari LoRA16 (0.853/0.855) |
+| LoRA rank 8 + 2 blok terakhir / LoRA16 seed kedua / LoRA rank 32 + MLP (Kaggle 2xT4) | seed kedua: stack nested 0.8545; r32: AUC 0.936 vs 0.945 | tidak lebih baik dari LoRA16 dan LoRA16-MLP |
+| LoRA16-MLP 2 epoch (`stop_epoch=2`) | sendiri terbaik (AUC 0.945) tapi stack nested 0.8538 | versi 4 epoch lebih membantu stack (0.8648) |
+| LoRA16-MLP di crop kepala + bahu (`data.head_crop`) | AUC 0.929; recall Repeated_Peeking 0.46 vs 0.50 | target utamanya justru turun |
+| V-JEPA 2 Diving48 / VideoMAE-B SSv2 / TimeSformer-SSv2 | proksi 0.82 / 0.77 / 0.77 | lebih lemah dari V-JEPA 2 SSv2 |
+| Stacking dengan logit perilaku (3 fitur terstruktur / 8 log-prob per model) | nested 0.8561 / 0.8508 vs 0.8553 | tidak menambah |
 
 ### 5.5 Pelajaran
 
@@ -300,14 +337,22 @@ Config, kode, dan hasilnya sudah dihapus. Kalau ingin mencoba lagi, lihat riwaya
   jadi pembersihan "detik netral" tidak bisa terukur di sana; LB yang memutuskan (dan hasilnya negatif).
 - **Simpan checkpoint dari awal.** Dua kali checkpoint hilang (VM dibuang; unduhan 16 GB lewat CLI gagal 500).
   Sekarang `colab/vm_save.py` meng-upload checkpoint dari VM ke dataset Kaggle privat.
-- Threshold sudah tidak kritis: F1 OOF stacking datar di threshold 0.35-0.50 (+-0.005). Rata-rata 5 fold di test
-  sedikit menekan probabilitas (rasio curang test 0.20 vs OOF 0.23), masih di zona datar.
+- **Threshold kritis di test walau datar di OOF.** F1 OOF stacking datar di 0.40-0.55, tetapi threshold OOF 0.53
+  membuat stack yang sama turun 0.8738 -> 0.8536 (#13 vs #11). Pola LB: submission yang memprediksi curang lebih
+  sedikit dari #7 (rasio 0.185-0.188) selalu kalah; menambah klip curang di atas #7 juga tidak membantu (#12). Untuk
+  stack baru pakai threshold tetap 0.43.
+- **Kenaikan nested di bawah ~0.01 tidak terbawa ke public LB** (~450 klip): LoRA16 (+0.007), onset v2, dan LoRA16-MLP
+  4 epoch (+0.009) tidak mengalahkan #7. Jangan memilih final hanya dari public LB maupun hanya dari nested CV.
+- **Sisa kesalahan terpusat di Repeated_Peeking** (recall 0.50, 23% tertukar dengan Looking_Around yang normal);
+  perilaku curang lain 0.82-0.98. Crop kepala yang lebih tajam tidak memperbaikinya.
 
 ## 6. Struktur folder
 
 ```
 configs/                 satu file YAML = satu eksperimen (lihat komentar di baris pertama tiap file)
   colab_vjepa2_win.yaml  V-JEPA 2 ViT-L + crop, label per jendela, 5 fold, stop_epoch 2 (Colab A100)
+  colab_vjepa2_lora16_win.yaml        V-JEPA 2 + LoRA16 q/k/v, 2 epoch (#9, #13)
+  colab_vjepa2_lora16mlp_e4_win.yaml  V-JEPA 2 + LoRA16 attention + MLP, 4 epoch (#13)
   colab_videomae_win.yaml VideoMAE-B + crop, label per jendela, 5 fold, stop_epoch 2 (Colab A100)
   feat_pose.yaml         head pose YOLO26s, label per jendela, 7 epoch (laptop); juga untuk cache kotak YOLO11s
   onsets.csv             onset aksi per video (frame), dibuat cli.onsets
@@ -320,6 +365,8 @@ colab/                   job Colab lewat CLI resmi Google (dijalankan dari WSL)
   vm_save.py             di VM: upload checkpoint tiap run ke dataset Kaggle privat dataslayer-ckpt-<run>
   login.sh               login Google sekali untuk CLI Colab
 kaggle/pose/             kernel GPU Kaggle (kaggle kernels push -p kaggle/pose): frame, pose, head pose
+kaggle/video/, video_b/  kernel Kaggle 2xT4 (fp16): satu model video pada fold [0,1,2] / [3,4], digabung setelahnya
+kaggle/final/            notebook final (inferensi saja): #7 -> submission.csv, #13 -> submission_lora.csv
 src/
   core/config.py         dataclass config + override `--set section.key=value`
   dataset/
@@ -330,7 +377,7 @@ src/
     transforms.py        augmentasi yang sama untuk semua frame satu klip
     features.py          dataset klip di atas cache pose
   features/              cache pose beku (YOLO-pose) untuk head pose dan kotak crop
-  models/clip_classifier.py  VideoMAE, V-JEPA 2, head pose
+  models/clip_classifier.py  VideoMAE, V-JEPA 2 (+ LoRA), head pose
   training/              optimizer, loss (perilaku diabaikan sebelum onset), loop training, CV per subjek, EMA
   evaluation/            metrik (F1-macro, threshold, AUC), stacking, Grad-CAM
   inference/predict.py   rata-rata semua fold (+ flip TTA) -> test_probs.csv, submission.csv
@@ -363,9 +410,13 @@ $env:PYTHONPATH = "src"
 .venv\Scripts\python -m cli.predict --config configs/feat_pose.yaml
 # Onset per video dari OOF (satu baris per jendela) model yang sudah ada -> configs/onsets.csv
 .venv\Scripts\python -m cli.onsets --oof outputs/stack_win/oof.csv --out configs/onsets.csv
-# Stacking run yang sudah punya oof.csv + test_probs.csv (@flip = versi flip TTA)
+# Stacking run yang sudah punya oof.csv + test_probs.csv (@flip = versi flip TTA): #7
 .venv\Scripts\python -m cli.stack --runs outputs/vjepa2_l_crop_win@flip outputs/videomae_b_crop_win@flip `
     outputs/feat_pose_y26s_win --out outputs/stack_win
+# #13: lima model; submission = test_probs.csv dengan threshold tetap 0.43 (lihat 4.6)
+.venv\Scripts\python -m cli.stack --runs outputs/vjepa2_l_crop_win@flip outputs/videomae_b_crop_win@flip `
+    outputs/feat_pose_y26s_win outputs/vjepa2_l_lora16_crop_win@flip outputs/vjepa2_l_lora16mlp_e4_crop_win@flip `
+    --out outputs/stack_best3
 .venv\Scripts\python -m pytest -q
 ```
 
@@ -454,9 +505,8 @@ Checklist anti-kesalahan (diperiksa ulang 2026-11-18):
 
 Ide lanjutan (urut dari yang paling menjanjikan; [bukti] = didukung hasil kita, [dugaan] = belum diuji):
 
-1. [bukti] **Notebook final Kaggle**: prediksi test dari dataset `dataslayer-ckpt-vjepa2-l-crop-win`,
-   `dataslayer-ckpt-videomae-b-crop-win` + head pose + `cli.stack`, harus mereproduksi submission final yang dipilih.
-2. [dugaan] V-JEPA 2 dengan lebih banyak blok dilatih (`model.train_blocks=4`) dan `backbone_lr` lebih kecil; ViT-g
-   dengan resep sendiri (lebih banyak blok, lr, 384 piksel) kalau waktu GPU cukup.
-3. [dugaan] Onset v2 saja tanpa pembersihan detik netral (#8 mencampur keduanya, jadi efek masing-masing belum terpisah).
-4. [dugaan] Fitur arah kepala dari keypoint untuk memisahkan Repeated_Peeking dari Looking_Around.
+1. [bukti] **Notebook final Kaggle** (`kaggle/final/`, dibuat oleh `kaggle/final/make_notebook.py`): sudah mereproduksi #7
+   dan #9 (beda 2 klip, T4 fp16 vs A100 bf16); versi #7 + #13 menunggu kuota GPU Kaggle mingguan.
+2. [dugaan] Repeated_Peeking vs Looking_Around: anotasi manual jeda di antara intipan (label test = perilaku yang
+   terlihat di klip) dan loss pasangan khusus kedua kelas itu.
+3. [dugaan] V-JEPA 2 ViT-g dengan resep sendiri (lebih banyak blok, lr, 384 piksel) kalau waktu GPU cukup.

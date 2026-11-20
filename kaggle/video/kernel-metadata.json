@@ -1,0 +1,16 @@
+{
+  "id": "ridwansigma/dataslayer-video",
+  "title": "dataslayer-video",
+  "code_file": "run.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "dataset_sources": ["ridwansigma/dataslayer-src", "ridwansigma/dataslayer-assets"],
+  "competition_sources": ["data-slayer-4"],
+  "kernel_sources": [],
+  "model_sources": [],
+  "machine_shape": "NvidiaTeslaT4"
+}

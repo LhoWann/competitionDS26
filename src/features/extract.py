@@ -50,9 +50,11 @@ def encode_to_files(encoder: nn.Module, jobs: list[tuple[Path, list[Path]]], cfg
 
 
 def extract(cfg: Config, workers: int, pretrained: bool = True) -> Path:
-    """Fills the feature cache for all train videos (`videos.csv`) and test sequences; skips existing files."""
+    """Fills the feature cache for all train videos (`videos.csv`; none without one, e.g. in the test-only inference
+    notebook) and test sequences; skips existing files."""
     fc, root, cache = cfg.features, cfg.feature_dir, Path(cfg.paths.cache_dir)
-    videos = pd.read_csv(cache / "videos.csv")
+    index = cache / "videos.csv"
+    videos = pd.read_csv(index) if index.exists() else pd.DataFrame({"video_id": [], "n_frames": []})
     jobs = [(root / "train" / f"{v}.npy", [cache / "frames" / v / f"{i:05d}.jpg" for i in range(0, n, fc.stride)])
             for v, n in zip(videos.video_id, videos.n_frames, strict=True)]
     test_dir = Path(cfg.paths.data_dir) / "test"

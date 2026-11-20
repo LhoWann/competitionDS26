@@ -1,11 +1,16 @@
-"""Clip classifiers -> 8 behavior logits: VideoMAE or V-JEPA 2 video transformer, or a head over cached frozen pose
-vectors."""
+"""Clip classifiers -> 8 behavior logits: VideoMAE or V-JEPA 2 video transformer, or a head over cached
+frozen pose vectors."""
 
 
 import timm
 import torch
 from torch import nn
-from transformers import VideoMAEConfig, VideoMAEModel, VJEPA2Config, VJEPA2ForVideoClassification
+from transformers import (
+    VideoMAEConfig,
+    VideoMAEModel,
+    VJEPA2Config,
+    VJEPA2ForVideoClassification,
+)
 
 from core.config import ModelConfig
 from dataset.labels import BEHAVIORS, CHEAT_IDS
@@ -59,6 +64,8 @@ class VJEPA2Classifier(nn.Module):
         if cfg.grad_checkpointing:
             self.backbone.gradient_checkpointing_enable()
         freeze_prefix(self.backbone.encoder.embeddings, self.backbone.encoder.layer, cfg.train_blocks)
+        if cfg.lora_rank:
+            add_lora(self.backbone.encoder.layer, cfg.lora_rank, cfg.lora_mlp)
         self.pooler = full.pooler
         self.register_buffer("mean", imagenet_stat(timm.data.IMAGENET_DEFAULT_MEAN), persistent=False)
         self.register_buffer("std", imagenet_stat(timm.data.IMAGENET_DEFAULT_STD), persistent=False)
@@ -80,6 +87,36 @@ def freeze_prefix(embeddings: nn.Module, layers: nn.ModuleList, train_blocks: in
         return
     for module in [embeddings, *layers[:len(layers) - train_blocks]]:
         module.requires_grad_(False)
+
+
+class LoRALinear(nn.Module):
+    """Frozen linear layer plus a trainable low-rank update `lora_b(lora_a(x)) * alpha / rank` (LoRA, Hu et al. 2021,
+    arXiv 2106.09685). `lora_b` starts at zero, so training starts from the pretrained function."""
+
+    def __init__(self, base: nn.Linear, rank: int, alpha: float = 16.0) -> None:
+        super().__init__()
+        self.base = base
+        self.lora_a = nn.Linear(base.in_features, rank, bias=False)
+        self.lora_b = nn.Linear(rank, base.out_features, bias=False)
+        nn.init.zeros_(self.lora_b.weight)
+        self.scale = alpha / rank
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.base(x) + self.lora_b(self.lora_a(x)) * self.scale
+
+
+def add_lora(layers: nn.ModuleList, rank: int, mlp: bool = False) -> None:
+    """Wraps the query/key/value projections of every block's attention in `LoRALinear`; with `mlp` also the attention
+    output projection and both MLP projections."""
+    for layer in layers:
+        attn = layer.attention
+        attn.query = LoRALinear(attn.query, rank)
+        attn.key = LoRALinear(attn.key, rank)
+        attn.value = LoRALinear(attn.value, rank)
+        if mlp:
+            attn.proj = LoRALinear(attn.proj, rank)
+            layer.mlp.fc1 = LoRALinear(layer.mlp.fc1, rank)
+            layer.mlp.fc2 = LoRALinear(layer.mlp.fc2, rank)
 
 
 class FeatureClipClassifier(nn.Module):

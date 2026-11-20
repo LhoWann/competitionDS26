@@ -37,13 +37,22 @@ class PoseEncoder(nn.Module):
         self.yolo = YOLO(str(weights_dir / f"{cfg.backbone}.pt") if pretrained else f"{cfg.backbone}.yaml")
         self.register_buffer("anchor", torch.zeros(()), persistent=False)
 
+    def detect(self, imgs: list[np.ndarray]) -> list[tuple[np.ndarray, float, np.ndarray] | None]:
+        """Most confident person per BGR frame: (xyxy box, confidence, (17, 3) keypoints) or None."""
+        dets = []
+        for r in self.yolo(imgs, verbose=False, device=self.anchor.device):
+            if len(r.boxes) and r.keypoints is not None:
+                k = int(r.boxes.conf.argmax())
+                dets.append((r.boxes.xyxy[k].cpu().numpy(), r.boxes.conf[k].item(), r.keypoints.data[k].cpu().numpy()))
+            else:
+                dets.append(None)
+        return dets
+
     @torch.inference_mode()
     def forward(self, frames: torch.Tensor) -> torch.Tensor:
         imgs = list(frames.flip(1).permute(0, 2, 3, 1).cpu().numpy())
         out = np.zeros((len(imgs), 1, POSE_DIM), np.float32)
-        for i, r in enumerate(self.yolo(imgs, verbose=False, device=self.anchor.device)):
-            if len(r.boxes) and r.keypoints is not None:
-                k = int(r.boxes.conf.argmax())
-                out[i, 0] = pose_vector(r.boxes.xyxy[k].cpu().numpy(), r.boxes.conf[k].item(),
-                                        r.keypoints.data[k].cpu().numpy(), imgs[i].shape[:2])
+        for i, det in enumerate(self.detect(imgs)):
+            if det is not None:
+                out[i, 0] = pose_vector(*det, imgs[i].shape[:2])
         return torch.from_numpy(out)

@@ -57,6 +57,8 @@ class ModelConfig:
     dropout: float = 0.2
     grad_checkpointing: bool = False
     train_blocks: int = -1
+    lora_rank: int = 0  # LoRA on query/key/value of every encoder block (0 = off)
+    lora_mlp: bool = False  # also LoRA on the attention output and both MLP projections
 
 
 @dataclass

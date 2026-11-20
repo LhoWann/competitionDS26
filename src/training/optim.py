@@ -33,8 +33,10 @@ def build_optimizer(model: nn.Module, cfg: TrainConfig) -> torch.optim.Optimizer
     the temporal transformer's 2D hidden matrices and AdamW on the rest (biases, norms, positional embedding, head).
     """
     wd = cfg.weight_decay
-    bb = [p for n, p in model.named_parameters() if n.startswith("backbone.") and p.requires_grad]
-    head = [(n, p) for n, p in model.named_parameters() if not n.startswith("backbone.")]
+    # LoRA matrices live inside the backbone but are new parameters: they learn at the head LR.
+    new = {n for n, _ in model.named_parameters() if not n.startswith("backbone.") or ".lora_" in n}
+    bb = [p for n, p in model.named_parameters() if n not in new and p.requires_grad]
+    head = [(n, p) for n, p in model.named_parameters() if n in new]
     muon = [p for n, p in head if cfg.optimizer == "muon" and n.startswith("temporal.") and p.ndim == 2]
     muon_ids = {id(p) for p in muon}
     adam_head = [p for _, p in head if id(p) not in muon_ids]

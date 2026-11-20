@@ -25,7 +25,13 @@ for run in sorted(p.parent for p in Path("/content/outputs").glob("*/config.yaml
     meta = {"title": slug, "id": f"{user}/{slug}", "licenses": [{"name": "CC0-1.0"}]}
     (stage / "dataset-metadata.json").write_text(json.dumps(meta))
     exists = subprocess.run(["kaggle", "datasets", "status", meta["id"]], capture_output=True).returncode == 0
+    if exists:  # a version replaces every file: keep the folds saved by earlier jobs (e.g. folds 0-2 + now 3-4)
+        old = stage.parent / f"{run.name}_old"
+        subprocess.run(["kaggle", "datasets", "download", meta["id"], "-p", str(old), "--unzip", "-q"], check=True)
+        for f in old.glob("fold*.pt"):
+            if not (stage / f.name).exists():
+                f.rename(stage / f.name)
     cmd = ["kaggle", "datasets", "version", "-m", "fold checkpoints"] if exists else ["kaggle", "datasets", "create"]
     subprocess.run([*cmd, "-p", str(stage), "-q"], check=True)
-    print(f"SAVED {run.name} -> {meta['id']} ({len(ckpts)} folds)", flush=True)
+    print(f"SAVED {run.name} -> {meta['id']} ({len(list(stage.glob('fold*.pt')))} folds)", flush=True)
 print("ALL SAVED", flush=True)

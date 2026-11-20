@@ -62,7 +62,8 @@ def predictions_frame(res: dict[str, np.ndarray]) -> pd.DataFrame:
 
 
 def build_model(cfg: Config, in_dim: int = 0) -> torch.nn.Module:
-    """`model.kind=videomae` / `vjepa2`: video transformers; `features`: head over `in_dim`-wide cached pose vectors."""
+    """`model.kind=videomae` / `vjepa2`: video transformers; `features`: head over `in_dim`-wide cached
+    pose vectors."""
     if cfg.model.kind == "features":
         return FeatureClipClassifier(cfg.model, in_dim, cfg.data.clip_len // cfg.features.stride)
     if cfg.model.kind == "videomae":

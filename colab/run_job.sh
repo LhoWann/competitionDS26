@@ -1,12 +1,13 @@
 #!/bin/bash
 # Trains + predicts configs on a Colab GPU through the official Colab CLI (run inside WSL, see README section 7):
 #   bash colab/run_job.sh [--ckpt] configs/colab_vjepa2_win.yaml configs/colab_videomae_win.yaml
-# Session `ds` (A100, L4 fallback) -> upload code, YOLO11s box cache, kaggle.json -> vm_setup / vm_start / vm_follow
-# (each retried only after a dropped websocket; all three are idempotent) -> outputs/<run>/ extracted into the repo
+# Session $COLAB_SESSION (default ds; A100, L4 fallback) -> upload code, box cache, kaggle.json -> vm_setup /
+# vm_start / vm_follow (each retried only after a dropped websocket; all idempotent) -> outputs/<run>/ in the repo
 # (with --ckpt the fold checkpoints go to private Kaggle datasets, vm_save.py) -> VM stopped.
 # Logs: ~/colab_runs/<time>/runner.log.
 export PATH=$HOME/.local/bin:$PATH
 C="colab --auth=adc"
+S=${COLAB_SESSION:-ds}  # session name; one CLI job per machine at a time (the CLI's local state is shared)
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 CKPT=0
 [ "$1" = "--ckpt" ] && { CKPT=1; shift; }
@@ -20,7 +21,7 @@ log() { echo "=== $* $(date) ===" | tee -a $R/runner.log; }
 step() {
   for attempt in 1 2 3 4 5 6; do
     log "STEP $1 attempt $attempt"
-    timeout $3 $C exec -s ds --timeout 0 --env "RUNS=$RUNS" --env "CKPT=$CKPT" -f $REPO/colab/$1 > $R/$1.log 2>&1
+    timeout $3 $C exec -s $S --timeout 0 --env "RUNS=$RUNS" --env "CKPT=$CKPT"       --env "EXTRA_SET=$EXTRA_SET" -f $REPO/colab/$1 > $R/$1.log 2>&1
     cat $R/$1.log >> $R/runner.log
     grep -q "$2" $R/$1.log && return 0
     grep -q "Connection was lost" $R/$1.log || { log "STEP $1 FAILED"; return 1; }
@@ -29,12 +30,12 @@ step() {
   log "STEP $1 RETRIES EXHAUSTED"; return 1
 }
 
-stop_vm() { $C stop -s ds >> $R/runner.log 2>&1; log "VM STOPPED"; }
+stop_vm() { $C stop -s $S >> $R/runner.log 2>&1; log "VM STOPPED"; }
 
-if ! $C status -s ds 2>/dev/null | grep -q "Hardware"; then
-  got=""
+got=""
+if ! $C status -s $S 2>/dev/null | grep -q "Hardware"; then
   for gpu in A100 A100 A100 L4; do
-    if $C new -s ds --gpu $gpu >> $R/runner.log 2>&1; then got=$gpu; break; fi
+    if $C new -s $S --gpu $gpu >> $R/runner.log 2>&1; then got=$gpu; break; fi
     sleep 30
   done
   [ -z "$got" ] && { log "NO GPU"; exit 1; }
@@ -42,14 +43,15 @@ if ! $C status -s ds 2>/dev/null | grep -q "Hardware"; then
 fi
 # The first exec after `colab new` sometimes drops: warm the kernel up until a trivial exec answers.
 for attempt in 1 2 3 4 5; do
-  echo 'print("KERNEL OK")' | timeout 120 $C exec -s ds > $R/warmup.log 2>&1
+  echo 'print("KERNEL OK")' | timeout 120 $C exec -s $S > $R/warmup.log 2>&1
   grep -q "KERNEL OK" $R/warmup.log && break
   log "WARMUP attempt $attempt failed"; sleep 20
 done
-grep -q "KERNEL OK" $R/warmup.log || { log "KERNEL NOT REACHABLE"; stop_vm; exit 1; }
+# Never stop a VM this run did not create: its detached training queue may still be running.
+grep -q "KERNEL OK" $R/warmup.log || { log "KERNEL NOT REACHABLE"; [ -n "$got" ] && stop_vm; exit 1; }
 tar --exclude=__pycache__ -czf $R/code.tgz -C $REPO src configs
 for f in $R/code.tgz $REPO/cache/pose_cache.tgz $REPO/secrets/kaggle.json; do
-  timeout 600 $C upload -s ds $f /content/$(basename $f) >> $R/runner.log 2>&1 ||
+  timeout 600 $C upload -s $S $f /content/$(basename $f) >> $R/runner.log 2>&1 ||
     { log "UPLOAD $f FAILED"; stop_vm; exit 1; }
 done
 log "UPLOADED $RUNS"
@@ -57,7 +59,7 @@ step vm_setup.py "SETUP DONE" 3600 || { stop_vm; exit 1; }
 step vm_start.py "queue" 600 || { stop_vm; exit 1; }
 step vm_follow.py "QUEUE EXIT" 21600 || exit 1
 grep -q "QUEUE EXIT 0" $R/vm_follow.py.log && log "QUEUE OK" || log "QUEUE FAILED"
-$C download -s ds /content/results.tgz $R/results.tgz >> $R/runner.log 2>&1 && tar -xzf $R/results.tgz -C $REPO &&
+$C download -s $S /content/results.tgz $R/results.tgz >> $R/runner.log 2>&1 && tar -xzf $R/results.tgz -C $REPO &&
   log "RESULTS IN $REPO/outputs"
 if [ $CKPT = 1 ]; then
   # Checkpoints exist only on the VM: if the upload fails, leave the VM running for a manual rescue.

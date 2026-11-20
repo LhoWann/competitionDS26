@@ -15,6 +15,7 @@ cache/
 cache_debug/
 outputs/
 kaggle_upload/
+kaggle_runs/
 *.pt
 *.pth
 *.safetensors

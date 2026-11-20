@@ -21,7 +21,7 @@ from evaluation.stack import stack
 from features.extract import extract
 from features.pose import POSE_DIM, pose_vector
 from inference.predict import predict
-from models.clip_classifier import cheat_log_probs
+from models.clip_classifier import LoRALinear, cheat_log_probs
 from training.cv import load_videos, pending_folds, run, summarize
 from training.engine import build_model, predictions_frame, train_fold
 from training.losses import clip_loss
@@ -191,6 +191,11 @@ def test_pose_vector_cache_and_head(fake_cache, tmp_path):
     root = extract(cfg, workers=0, pretrained=False)
     assert np.load(root / "train" / "s0_v0.npy").shape == (33, 1, POSE_DIM)
     assert np.load(root / "test" / "test_seq_00001.npy").shape == (15, 1, POSE_DIM)
+    test_only = load_config(None, [f"paths.cache_dir={tmp}/fresh", f"paths.data_dir={tmp}/data",
+                                   "features.backbone=yolo11n-pose", "features.img_size=[64,96]"])
+    fresh = extract(test_only, workers=0, pretrained=False)
+    assert [p.name for p in (fresh / "test").iterdir()] == ["test_seq_00001.npy"]
+    assert not any((fresh / "train").iterdir())
     va = FeatureClipDataset(videos, cfg, train=False)
     assert len(va) == 8 and va.dim == POSE_DIM and va[1]["inputs"].shape == (15, POSE_DIM) and va[1]["start"] == 30
     te = FeatureSequenceDataset(cfg)
@@ -228,6 +233,34 @@ def test_vjepa2_partial_freeze():
     clip_loss(out, torch.tensor([0, 5]), torch.tensor([0, 1]), cfg.train).backward()
     optimizer.step()
     assert out.shape == (2, 8) and not torch.equal(before, last) and layers[0].mlp.fc1.weight.grad is None
+
+def test_vjepa2_lora():
+    cfg = tiny_cfg("model.kind=vjepa2", "data.img_size=[32,32]", "model.train_blocks=1", "model.lora_rank=4")
+    model = build_model(cfg)
+    enc = model.backbone.encoder
+    trainable = [any(p.requires_grad for n, p in layer.named_parameters() if ".lora_" not in n) for layer in enc.layer]
+    assert trainable[-1] and not any(trainable[:-1])
+    assert not any(p.requires_grad for p in enc.embeddings.parameters())
+    lora = enc.layer[1].attention.query
+    assert isinstance(lora, LoRALinear) and not lora.base.weight.requires_grad and lora.lora_a.weight.requires_grad
+    model.eval()
+    x = torch.randint(0, 255, (2, 4, 3, 32, 32), dtype=torch.uint8)
+    lora.lora_b.weight.data.zero_()
+    with_lora = model(x)
+    assert torch.allclose(with_lora, model.head(model.pooler(model.backbone(
+        pixel_values_videos=(x.float() - model.mean) / model.std, skip_predictor=True).last_hidden_state)))
+    model.train()
+    optimizer = build_optimizer(model, cfg.train)
+    lrs = {id(p): g["lr"] for g in optimizer.param_groups for p in g["params"]}
+    last_mlp = enc.layer[-1].mlp.fc1.weight
+    assert lrs[id(lora.lora_b.weight)] == cfg.train.lr and lrs[id(last_mlp)] == cfg.train.backbone_lr
+    clip_loss(model(x), torch.tensor([0, 5]), torch.tensor([0, 1]), cfg.train).backward()
+    optimizer.step()
+    assert lora.lora_b.weight.abs().sum() > 0
+    mlp = build_model(tiny_cfg("model.kind=vjepa2", "data.img_size=[32,32]", "model.train_blocks=0",
+                               "model.lora_rank=4", "model.lora_mlp=true")).backbone.encoder.layer[0]
+    assert all(isinstance(m, LoRALinear) for m in (mlp.attention.proj, mlp.mlp.fc1, mlp.mlp.fc2))
+
 
 def test_person_box_crop(tmp_path):
     pose = np.zeros((3, POSE_DIM), np.float32)
@@ -389,6 +422,7 @@ def test_roi_boxes():
     assert np.isclose((head[2] - head[0]) * 640, 2 * (head[3] - head[1]) * 360)
     assert (right[0] + right[2]) / 2 < 0.5 < (left[0] + left[2]) / 2
     assert roi_boxes(np.zeros((3, POSE_DIM), np.float32), 0.5) is None
+
 
 
 def test_gradcam_report(video_cache, tmp_path):
