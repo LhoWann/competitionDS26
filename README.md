@@ -6,15 +6,22 @@ atau **1 = curang**. Metrik: **F1-macro** (rata-rata F1 kelas normal dan kelas c
 Submission terbaik: **public LB 0.8764** (#7, `outputs/stack_win`): V-JEPA 2 + VideoMAE + head pose, dilatih dengan
 **label per jendela** (onset aksi), lalu digabung dengan **stacking logistic regression**.
 
-**Dua pilihan final** (keduanya dibuat ulang oleh notebook Kaggle `kaggle/final/`, lihat [5.3](#53-submission-public-leaderboard)):
+**Submission final (dipilih 2026-11-21, lomba hanya mengizinkan 1): #13**, public 0.8738, nested CV 0.865:
+#7 + V-JEPA 2 LoRA16 + V-JEPA 2 LoRA16-MLP 4 epoch, threshold tetap 0.43. Notebook laporan akhir `kaggle/final/`
+(kernel `dataslayer-final`) menjelaskan metode, menghitung ulang angka validasi dari OOF, dan menulis `submission.csv`
+yang sama persis dengan #13 (0 dari 1515 klip berbeda).
 
-| Pilihan | Isi | Public LB | Nested CV | Berkas di notebook |
-|---|---|---|---|---|
-| **#7** | V-JEPA 2 + VideoMAE + head pose, threshold OOF 0.44 | **0.8764** | 0.849 | `submission.csv` |
-| **#13** | #7 + V-JEPA 2 LoRA16 + V-JEPA 2 LoRA16-MLP 4 epoch, threshold tetap 0.43 | 0.8738 | **0.865** | `submission_lora.csv` |
+#7 tidak dipilih: checkpoint aslinya hilang, model hasil training ulang berbeda 4-5 klip di threshold mana pun
+(hasil ulang di notebook: public 0.8697); selisih public #7 vs #13 hanya ~1 klip, sedangkan nested CV memihak #13
+(bootstrap per subjek terhadap #9: interval 95% [+0.002, +0.016]).
 
-#7 = skor public terbaik; #13 = skor validasi jujur terbaik (bootstrap per subjek: lebih baik dari stack tanpa
-LoRA-MLP dengan interval 95% [+0.002, +0.016]). Memilih keduanya melindungi dari acaknya 30% public LB.
+**Yang dikumpulkan (Guidebook MLC):**
+
+| Babak | Berkas | Status |
+|---|---|---|
+| Penyisihan (sampai 29 Nov) | submission Kaggle final | #13 dipilih |
+| Penyisihan (bobot nilai 35%) | notebook laporan akhir bahasa Indonesia + model terlatih (`.pt`), pakai seed | kernel `dataslayer-final` + dataset `dataslayer-src`, `dataslayer-runs`, 4 x `dataslayer-ckpt-*` (masih privat; cara kumpul menunggu info panitia) |
+| Final (kalau lolos, 17 Des 23.59 WIB, Google Form) | Technical Report (PDF) + slide presentasi (PDF/PPTX) | dibuat setelah pengumuman finalis 7 Des |
 
 ## Daftar isi
 
@@ -366,7 +373,7 @@ colab/                   job Colab lewat CLI resmi Google (dijalankan dari WSL)
   login.sh               login Google sekali untuk CLI Colab
 kaggle/pose/             kernel GPU Kaggle (kaggle kernels push -p kaggle/pose): frame, pose, head pose
 kaggle/video/, video_b/  kernel Kaggle 2xT4 (fp16): satu model video pada fold [0,1,2] / [3,4], digabung setelahnya
-kaggle/final/            notebook final (inferensi saja): #7 -> submission.csv, #13 -> submission_lora.csv
+kaggle/final/            notebook laporan akhir (make_notebook.py): metode, hasil OOF, inferensi #13 -> submission.csv
 src/
   core/config.py         dataclass config + override `--set section.key=value`
   dataset/
@@ -505,8 +512,8 @@ Checklist anti-kesalahan (diperiksa ulang 2026-11-18):
 
 Ide lanjutan (urut dari yang paling menjanjikan; [bukti] = didukung hasil kita, [dugaan] = belum diuji):
 
-1. [bukti] **Notebook final Kaggle** (`kaggle/final/`, dibuat oleh `kaggle/final/make_notebook.py`): sudah mereproduksi #7
-   dan #9 (beda 2 klip, T4 fp16 vs A100 bf16); versi #7 + #13 menunggu kuota GPU Kaggle mingguan.
+1. [bukti] **Notebook final Kaggle** (`kaggle/final/`, dibuat oleh `kaggle/final/make_notebook.py`): laporan akhir
+   bahasa Indonesia; mereproduksi #13 persis di T4 fp16 (0 klip berbeda dari file A100 bf16).
 2. [dugaan] Repeated_Peeking vs Looking_Around: anotasi manual jeda di antara intipan (label test = perilaku yang
    terlihat di klip) dan loss pasangan khusus kedua kelas itu.
 3. [dugaan] V-JEPA 2 ViT-g dengan resep sendiri (lebih banyak blok, lr, 384 piksel) kalau waktu GPU cukup.
