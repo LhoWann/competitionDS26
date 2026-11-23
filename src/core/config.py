@@ -31,7 +31,9 @@ class DataConfig:
     speed_jitter: float = 0.0
     person_crop: float = 0.0
     crop_features: str = "yolo11s-pose_360x640_s2"
+    eval_passes: int = 1  # >1: validation/test clips as interleaved views that together use every frame (FAQ 66/70)
     onsets: str = ""  # CSV video_id,onset (frame where the action starts; `cli.onsets`): enables window labels
+    intervals: str = ""  # JSON of manual cheating intervals (`cli.annotate`): window labels of the annotated videos
 
 
 @dataclass

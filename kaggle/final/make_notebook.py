@@ -1,5 +1,5 @@
 """Writes kaggle/final/final.ipynb (+ kernel-metadata.json): the final report notebook (Indonesian) that explains the
-method, recomputes the validation numbers from the saved OOF predictions and reproduces the final submission #13.
+method, recomputes the validation numbers from the saved OOF predictions and reproduces the final submission.
 Run from the repo root: `python kaggle/final/make_notebook.py`, then `kaggle kernels push -p kaggle/final`."""
 import json
 from pathlib import Path
@@ -7,21 +7,26 @@ from pathlib import Path
 MD_INTRO = """# Deteksi Kecurangan Ujian dari Klip Video 1 Detik
 ## Laporan akhir Machine Learning Competition Data Slayer 4.0
 
-**Hasil akhir: submission #13, public leaderboard 0.8738 (F1-macro), nested CV per subjek 0.865.**
+**Hasil akhir: public leaderboard 0.8811 (F1-macro); nested CV per subjek 0.920 terhadap label anotasi manual
+(threshold 0.43).**
 
 Notebook ini adalah laporan akhir sekaligus notebook yang menghasilkan submission final:
 
 1. menjelaskan masalah, data, metode, validasi, dan eksperimen yang sudah dicoba;
 2. **menghitung ulang angka validasi** dari prediksi out-of-fold (OOF) yang tersimpan (bagian 5);
 3. **menjalankan inferensi test** dengan model yang sudah dilatih (checkpoint `.pt`) dan menulis `submission.csv` yang
-   sama persis dengan submission final (bagian 6, diperiksa otomatis di sel terakhir).
+   sama dengan submission final (bagian 6; jumlah klip yang berbeda dicetak di sel terakhir).
 
 **Ringkasan metode.** Setiap klip 1 detik dipotong di sekitar badan peserta (kotak dari YOLO-pose), lalu dinilai oleh
 tiga model video berbasis **V-JEPA 2 ViT-L** (fine-tune 2 blok terakhir, LoRA rank 16, LoRA rank 16 + MLP),
 **VideoMAE-B**, dan satu model kecil di atas **keypoint kepala/badan YOLO26s-pose**. Model dilatih dengan **label per
-jendela**: bagian awal video curang (sebelum aksi dimulai) dianggap normal, sesuai aturan label test. Kelima
+jendela**: bagian awal video curang (sebelum aksi dimulai) dianggap normal, sesuai aturan label test. Model terkuat
+(LoRA16-MLP) dilatih dengan label dari **anotasi manual 30 fps**: manusia menandai frame mulai dan selesai setiap aksi
+curang di video train (bagian 3.2). Kelima
 probabilitas digabung dengan **stacking logistic regression** yang dilatih di prediksi OOF, lalu diberi threshold 0.43.
-Validasi selalu **per subjek** (5 fold), karena subjek test tidak ada di train.
+Validasi selalu **per subjek** (5 fold), karena subjek test tidak ada di train. Saat inferensi **ke-30 frame setiap
+klip diproses** (FAQ 66/70): model video melihat dua view (frame genap dan frame ganjil), dan keypoint diambil dari
+setiap frame (bagian 3.6).
 
 **Daftar isi**
 
@@ -89,20 +94,40 @@ model belajar hal yang salah: fase netral di awal video curang terlihat sama den
 
 Perubahan ini saja menaikkan public LB dari **0.729 ke 0.876**.
 
-### 3.2 Crop orang
+### 3.2 Anotasi manual interval menyontek (30 fps)
 
-Kotak orang dihitung YOLO11s-pose (bobot COCO, tidak di-fine-tune) **dari klip itu sendiri**. Crop persegi dengan
-margin 15% memperbesar tangan, jam tangan, dan kepala sekitar 1.5x.
+Label onset masih kasar: semua detik setelah onset dianggap curang, padahal Repeated_Peeking misalnya terputus-putus
+(melirik, lalu kembali menulis). Karena itu kami menganotasi video train secara manual (FAQ 30/47/52):
 
-### 3.3 Model
+- **Alat:** `cli.annotate` memutar frame train 30 fps di browser lokal (localhost, tidak ada data yang keluar).
+  Anotator menandai frame **mulai** dan **selesai** setiap aksi curang. Rubrik: Repeated_Peeking = setiap lirikan ke
+  arah contekan atau kertas lain; Using_Smartwatch = saat mengoperasikan jam (hanya melihat = normal);
+  Reading_Hidden_Notes = saat membaca contekan, termasuk mengambil dan menyimpannya; Looking_Under_the_Desk = saat
+  melihat ke bawah meja.
+- **Putaran 1 (label training model final):** Repeated_Peeking dan Using_Smartwatch (102 video). Alat menampilkan
+  usulan interval dari model OOF kami sendiri (dilatih di train saja, bukan VLM; FAQ 50.1/51) sebagai titik awal;
+  anotator menonton setiap video lalu mengoreksi dan menyimpan intervalnya. Video lain tetap memakai label onset.
+- **Putaran 2 (label emas validasi):** ke-208 video curang dianotasi ulang dalam **mode buta** (tanpa kurva, usulan,
+  atau onset model), sehingga label evaluasi tidak terpengaruh model. Statistik kedua putaran ada di bagian 5.4.
+- **Aturan jendela:** jendela 1 detik berlabel curang jika **minimal 50% frame-nya ditandai** (perilaku dominan,
+  FAQ 44.3/63.1); selain itu normal (`dataset/intervals.py`, `dataset/labels.py:window_target`).
+- **Hasil:** LoRA16-MLP yang dilatih ulang dengan label putaran 1 naik dari AUC 0.964 ke 0.978 (label emas), dan
+  public LB dari 0.8738 ke **0.8811**.
+
+### 3.3 Crop orang
+
+Kotak orang dihitung YOLO11s-pose (bobot COCO, tidak di-fine-tune) di **setiap frame klip itu sendiri**, lalu
+digabung menjadi satu kotak per klip. Crop dengan margin 15% memperbesar tangan, jam tangan, dan kepala sekitar 1.5x.
+
+### 3.4 Model
 
 | Model | Backbone pretrained | Bagian yang dilatih | Input |
 |---|---|---|---|
-| V-JEPA 2 | ViT-L, Something-Something v2 | 2 blok terakhir + head | 16 frame, crop 256 |
-| V-JEPA 2 + LoRA16 | sama | LoRA rank 16 di query/key/value ke-24 blok + head | 16 frame, crop 256 |
-| V-JEPA 2 + LoRA16-MLP | sama | LoRA rank 16 di attention (q/k/v + output) dan MLP + head | 16 frame, crop 256 |
-| VideoMAE-B | ViT-B, Kinetics-400 | semua lapisan | 16 frame, crop 224 |
-| Head pose | YOLO26s-pose beku (COCO) | transformer temporal kecil di atas keypoint | keypoint tiap 2 frame |
+| V-JEPA 2 | ViT-L, Something-Something v2 | 2 blok terakhir + head | 16 frame per view, crop 256 |
+| V-JEPA 2 + LoRA16 | sama | LoRA rank 16 di query/key/value ke-24 blok + head | 16 frame per view, crop 256 |
+| V-JEPA 2 + LoRA16-MLP | sama | LoRA rank 16 di attention (q/k/v + output) dan MLP + head | 16 frame/view, crop 256 |
+| VideoMAE-B | ViT-B, Kinetics-400 | semua lapisan | 16 frame per view, crop 224 |
+| Head pose | YOLO26s-pose beku (COCO) | transformer temporal kecil di atas keypoint | keypoint ke-30 frame |
 
 Nama bobot Hugging Face ada di tabel resep bagian 5.1. Keypoint head pose relatif terhadap kotak orang.
 
@@ -114,46 +139,62 @@ Nama bobot Hugging Face ada di tabel resep bagian 5.1. Keypoint head pose relati
 - Head pose memakai koordinat relatif terhadap kotak orang, jadi tidak terpengaruh baju, wajah, atau warna kamera.
   Model ini lemah sendirian, tetapi menambah informasi yang berbeda di stacking.
 
-### 3.4 Training
+### 3.5 Training
 
 - **Loss:** cross-entropy 8 perilaku (label smoothing 0.1) + loss biner pada `p_cheat` = jumlah peluang 4 perilaku
   curang. Jendela sebelum onset hanya ikut di loss biner.
-- **Sampling:** 16 jendela acak per video per epoch. Augmentasi: crop acak 70-100%, kecepatan +-20%, grayscale 10%,
-  flip horizontal. Augmentasi yang sama dipakai untuk semua frame satu klip.
+- **Sampling (hanya data train):** 16 jendela acak per video per epoch; dari tiap jendela diambil 16 frame acak yang
+  tersebar merata. Augmentasi: crop acak 70-100%, kecepatan +-20%, grayscale 10%, flip horizontal. Augmentasi yang
+  sama dipakai untuk semua frame satu klip.
 - **Optimasi:** AdamW, warmup 1 epoch lalu cosine, EMA bobot. **Jumlah epoch tetap** (bukan memilih epoch terbaik per
   fold, yang membuat OOF terlalu optimistis 0.02-0.04): 2 epoch untuk model video (berhenti di epoch 2 dari jadwal
   4/10), 4 epoch untuk LoRA16-MLP, 7 epoch untuk head pose. Detail tiap run ada di tabel bagian 5.1.
 - **Perangkat:** model video di Colab A100 (bf16), head pose di laptop. Checkpoint 5 fold tiap model disimpan sebagai
   dataset Kaggle dan dipakai notebook ini.
 
-### 3.5 Flip TTA
+### 3.6 Semua 30 frame dipakai (FAQ 66/70)
+
+Setiap klip test berisi 30 frame dan **semuanya diproses langsung**, termasuk di ekstraksi fitur:
+
+- **Model video** menerima 16 frame per input. Satu klip dibagi menjadi dua view: frame genap (0, 2, ..., 28) dan
+  frame ganjil (1, 3, ..., 29). Masing-masing 15 frame dijadikan 16 (satu frame dipakai dua kali, urutan tetap), lalu
+  log-probabilitas kedua view dirata-rata (`data.eval_passes=2`, `dataset/clips.py:eval_views`). Kode menolak
+  konfigurasi yang membuat ada frame terlewat. Jarak antar-frame di tiap view (2 frame) hampir sama dengan saat
+  training (rata-rata 1.9 frame), jadi checkpoint yang sama bisa dipakai.
+- **Kotak crop dan keypoint head pose** diambil dari ke-30 frame (`features.stride=1`); head pose dilatih ulang di atas
+  30 keypoint per klip (`configs/feat_pose_a30.yaml`, resep sama: 7 epoch).
+- **OOF dihitung ulang dengan cara yang sama** (`cli.predict --oof`), sehingga stacking dan threshold dipilih di atas
+  prediksi yang dibuat persis seperti prediksi test.
+
+### 3.7 Flip TTA
 
 Validasi dan test dihitung dua kali: frame asli dan frame dibalik horizontal. Versi yang dipakai dipilih dari AUC OOF:
 untuk keempat model video, versi flip menang tipis (`@flip`). Kamera samping selalu dari sisi yang sama, jadi petunjuk
 berarah (jam di tangan kiri, arah mengintip) berubah saat di-flip.
 
-### 3.6 Stacking dan threshold
+### 3.8 Stacking dan threshold
 
 - Fitur stacking = logit `p_cheat` kelima model untuk satu klip. **Logistic regression** dilatih di OOF gabungan
   (label per jendela), lalu diterapkan apa adanya ke **setiap klip test sendiri-sendiri** (`cli.stack`). Stacking
   mempelajari seberapa besar setiap model bisa dipercaya. Di nested CV hasilnya lebih baik dari rata-rata bobot sama.
 - **Threshold 0.43.** Kurva F1 OOF datar di 0.40-0.55 (grafik bagian 5.3), sehingga "threshold F1 terbaik di OOF"
   melompat acak di dalam rentang itu. 0.43 adalah titik di dalam plateau yang juga terpilih dari OOF untuk stack
-  3 model sebelumnya. Di nested CV, F1 stack ini pada 0.43 hanya sekitar 0.002 di bawah F1 pada threshold yang dipilih
-  per fold (tabel bagian 5.2)."""
+  3 model sebelumnya. Di nested CV, F1 stack ini pada 0.43 sedikit lebih tinggi daripada F1 pada threshold yang
+  dipilih per fold (tabel bagian 5.2)."""
 
 MD_VALID = """## 4. Validasi
 
 - **5 fold per subjek:** 26 subjek dibagi 6/5/5/5/5. Kamera depan dan samping satu subjek selalu di fold yang sama.
   Model fold k dilatih di 4 fold lain dan memprediksi fold k. Gabungan prediksinya = **OOF**, dipakai untuk memilih
   model, melatih stacking, dan memilih threshold.
-- **Label proksi:** label test tidak tersedia untuk train, jadi OOF dinilai dengan label yang meniru aturan test:
-  jendela video curang dianggap curang mulai onset. Dipakai tiga versi: onset dari tabel (`configs/onsets.csv`),
-  onset tetap detik 7, dan onset tetap detik 8. Proksi 7s/8s sama untuk semua model, jadi adil untuk membandingkan.
+- **Label emas (utama):** anotasi manual putaran 2 (mode buta, bagian 3.2), jendela curang jika minimal 50% frame
+  ditandai. **Proksi lama** tetap dilaporkan: jendela video curang dianggap curang mulai detik 7 atau 8.
 - **Nested CV:** stacking dan threshold juga merupakan langkah pemilihan. Supaya jujur, keduanya dilatih di 4 fold dan
   dinilai di fold ke-5, bergantian. Angka ini yang dipakai untuk memilih submission final.
-- Proksi nested selalu sekitar 0.01-0.03 **di bawah** public LB dengan urutan yang sama, jadi keputusan diambil dari
-  proksi OOF, bukan dari public LB (sekitar 450 klip, terlalu sedikit untuk membedakan selisih di bawah 0.01)."""
+- Setiap keputusan memakai aturan yang ditulis **sebelum** melihat hasil (kenaikan minimal +0.005 di nested CV label
+  emas, proksi tidak boleh turun lebih dari 0.005). Public LB (sekitar 450 klip) hanya untuk konfirmasi.
+- Nested CV label emas (0.92) berada **di atas** public LB (0.88), sedangkan proksi (0.86) di bawahnya. Kemungkinan
+  aturan label test panitia sedikit berbeda dari aturan 50% kami; urutan antar-kandidat tetap sama."""
 
 C_SETUP = """import os
 import random
@@ -181,22 +222,25 @@ os.environ["PYTHONHASHSEED"] = str(SEED)
 INPUT = Path("/kaggle/input")
 COMP = next(INPUT.rglob("sample_submission.csv")).parent
 CODE = next(INPUT.rglob("src/core/config.py")).parents[2]
-RUNS_IN = next(INPUT.rglob("vjepa2_l_crop_win/config.yaml")).parents[1]
+RUNS_IN = next(INPUT.rglob("vjepa2_l_crop_win_a30/config.yaml")).parents[1]
 WORK = Path("/kaggle/working")
 OUT, CACHE = WORK / "outputs", Path("/tmp/cache")  # noqa: S108 - fitur test tidak ikut ke output notebook
 sys.path.insert(0, str(CODE / "src"))
+from dataset.intervals import load_intervals, marked_fraction  # noqa: E402
 from evaluation.metrics import best_threshold, binary_metrics  # noqa: E402
 from evaluation.stack import KEYS, cheat_logit  # noqa: E402
 
-# Stack final #13: lima model (@flip = versi flip TTA), threshold tetap 0.43.
-STACK = ["vjepa2_l_crop_win@flip", "videomae_b_crop_win@flip", "feat_pose_y26s_win", "vjepa2_l_lora16_crop_win@flip",
-         "vjepa2_l_lora16mlp_e4_crop_win@flip"]
+# Stack final (stack_gold): lima model (@flip = versi flip TTA), semua memakai ke-30 frame tiap klip, threshold 0.43.
+# Model pertama (LoRA16-MLP dengan label anotasi manual) menentukan label stacking (`cli.stack`).
+STACK = ["vjepa2_l_lora16mlp_e4_crop_gold@flip", "vjepa2_l_crop_win_a30@flip", "videomae_b_crop_win_a30@flip",
+         "feat_pose_y26s_a30_win", "vjepa2_l_lora16_crop_win_a30@flip"]
+PREV = "vjepa2_l_lora16mlp_e4_crop_win_a30@flip"  # LoRA16-MLP label onset (final lama), hanya untuk perbandingan
 RUNS = [s.split("@")[0] for s in STACK]
 THR = 0.43
-CKPT = {"vjepa2_l_crop_win": "dataslayer-ckpt-vjepa2-l-crop-win",
-        "vjepa2_l_lora16_crop_win": "dataslayer-ckpt-vjepa2-l-lora16-crop-win",
-        "vjepa2_l_lora16mlp_e4_crop_win": "dataslayer-ckpt-vjepa2-l-lora16mlp-e4-crop-win",
-        "videomae_b_crop_win": "dataslayer-ckpt-videomae-b-crop-win"}
+CKPT = {"vjepa2_l_lora16mlp_e4_crop_gold": "dataslayer-ckpt-vjepa2-l-lora16mlp-e4-crop-gold",
+        "vjepa2_l_crop_win_a30": "dataslayer-ckpt-vjepa2-l-crop-win",
+        "vjepa2_l_lora16_crop_win_a30": "dataslayer-ckpt-vjepa2-l-lora16-crop-win",
+        "videomae_b_crop_win_a30": "dataslayer-ckpt-videomae-b-crop-win"}
 os.environ["PYTHONPATH"] = str(CODE / "src")
 os.environ["TQDM_MININTERVAL"] = "30"
 PATHS = f"paths.data_dir={COMP} paths.cache_dir={CACHE} paths.output_dir={OUT}"
@@ -227,13 +271,16 @@ for run in RUNS:
     if t["seed"] != SEED:
         raise ValueError(f"{run}: train.seed {t['seed']} != {SEED}")
     if m["kind"] == "features":
-        trained, backbone, inp = "head temporal (pose beku)", f["backbone"], f"keypoint tiap {f['stride']} frame"
-    elif m.get("lora_rank"):
-        trained = f"LoRA r{m['lora_rank']} " + ("attention + MLP" if m.get("lora_mlp") else "q/k/v")
-        backbone, inp = m["backbone"], f"{d['num_frames']} frame, crop {d['img_size'][0]}"
+        if f["stride"] != 1:
+            raise ValueError(f"{run}: pose features must cover every frame (FAQ 66/70)")
+        trained, backbone, inp = "head temporal (pose beku)", f["backbone"], "keypoint ke-30 frame"
     else:
-        trained = "semua lapisan" if m["train_blocks"] < 0 else f"{m['train_blocks']} blok terakhir"
-        backbone, inp = m["backbone"], f"{d['num_frames']} frame, crop {d['img_size'][0]}"
+        if d["eval_passes"] * d["num_frames"] < d["clip_len"]:
+            raise ValueError(f"{run}: inference views do not cover all {d['clip_len']} frames (FAQ 66/70)")
+        lora = f"LoRA r{m['lora_rank']} " + ("attention + MLP" if m.get("lora_mlp") else "q/k/v")
+        blocks = "semua lapisan" if m["train_blocks"] < 0 else f"{m['train_blocks']} blok terakhir"
+        trained, backbone = lora if m.get("lora_rank") else blocks, m["backbone"]
+        inp = f"{d['eval_passes']} view x {d['num_frames']} frame (ke-30 frame), crop {d['img_size'][0]}"
     epochs = f"{t['stop_epoch']} (jadwal {t['epochs']})" if t["stop_epoch"] else str(t["epochs"])
     rows.append({"run": run, "backbone": backbone, "dilatih": trained, "input": inp, "epoch": epochs,
                  "batch efektif": t["batch_size"] * t["grad_accum"], "lr head": t["lr"],
@@ -242,39 +289,45 @@ pd.DataFrame(rows).set_index("run")"""
 
 MD_OOF = """### 5.2 Skor OOF per model dan nested CV stacking
 
-Tabel pertama: setiap model sendiri di OOF (label onset dari tabel). Tabel kedua: **nested CV per fold subjek**,
-dinilai dengan proksi onset tetap detik 7 dan 8. Stacking dan threshold dilatih di 4 fold, dinilai di fold ke-5.
-"thr dipilih per fold" = threshold F1 terbaik di 4 fold latih; "thr 0.43" = threshold tetap yang dipakai submission."""
+Tabel pertama: setiap model sendiri di OOF, dinilai dengan label emas (anotasi putaran 2). Tabel kedua: **nested CV
+per fold subjek**. Stacking dan threshold dilatih di 4 fold (dengan label training masing-masing stack), dinilai di
+fold ke-5 dengan label emas dan proksi detik 7/8. "thr dipilih per fold" = threshold F1 terbaik di 4 fold latih;
+"thr 0.43" = threshold tetap yang dipakai submission."""
 
 C_OOF = """def load_oof(spec: str) -> pd.DataFrame:
     run, _, variant = spec.partition("@")
     return pd.read_csv(RUNS_IN / run / f"oof{'_' + variant if variant else ''}.csv")
 
 
-oofs = [load_oof(s) for s in STACK]
+SPECS = STACK + [PREV]
+oofs = [load_oof(s) for s in SPECS]
 common = oofs[0][KEYS]
 for o in oofs[1:]:
     common = common.merge(o[KEYS], on=KEYS)
 oofs = [common.merge(o, on=KEYS).sort_values(KEYS, ignore_index=True) for o in oofs]
 base = oofs[0]
-y = base.label.to_numpy()
-cheat_video = base.label.groupby(base.video_id).transform("max").eq(1)
-mid = base.start + 15
-proxy = {s: (cheat_video & (mid >= 30 * s)).astype(int).to_numpy() for s in (7, 8)}
+y_fit = base.label.to_numpy()  # label training stack final: anotasi putaran 1 + onset
+y_onset = oofs[1].label.to_numpy()  # label training stack lama: onset
+IV2 = load_intervals(CODE / "configs" / "cheat_intervals_v2.json")
+gold = np.array([int(v in IV2 and marked_fraction(IV2[v], s, 30) >= 0.5) for v, s in zip(base.video_id, base.start)])
+cheat_video = pd.Series(y_onset).groupby(base.video_id.to_numpy()).transform("max").eq(1).to_numpy()
+mid = (base.start + 15).to_numpy()
+proxy = {s: (cheat_video & (mid >= 30 * s)).astype(int) for s in (7, 8)}
 print(f"{len(base)} jendela OOF, {base.video_id.nunique()} video, {base.subject.nunique()} subjek, "
       f"{base.fold.nunique()} fold")
 
 rows = []
-for spec, o in zip(STACK, oofs):
+for spec, o in zip(SPECS, oofs):
     p = o.p_cheat.to_numpy()
-    rows.append({"model": spec, "AUC": roc_auc_score(y, p), f"F1@{THR}": binary_metrics(p, y, THR)["f1_macro"],
-                 "F1 (thr terbaik)": best_threshold(p, y)[1]})
+    rows.append({"model": spec, "AUC emas": roc_auc_score(gold, p),
+                 f"F1 emas @{THR}": binary_metrics(p, gold, THR)["f1_macro"],
+                 "F1 emas (thr terbaik)": best_threshold(p, gold)[1]})
 pd.DataFrame(rows).set_index("model").round(4)"""
 
 C_NESTED = """X = np.stack([cheat_logit(o.p_cheat) for o in oofs], 1)
 
 
-def nested(cols: list[int], thr: float | None) -> tuple[np.ndarray, np.ndarray]:
+def nested(cols: list[int], y: np.ndarray, thr: float | None) -> tuple[np.ndarray, np.ndarray]:
     prob, pred = np.zeros(len(base)), np.zeros(len(base), int)
     for f in sorted(base.fold.unique()):
         tr, te = (base.fold != f).to_numpy(), (base.fold == f).to_numpy()
@@ -285,19 +338,21 @@ def nested(cols: list[int], thr: float | None) -> tuple[np.ndarray, np.ndarray]:
     return prob, pred
 
 
-CANDIDATES = {"V-JEPA 2 saja": [0], "#7: V-JEPA 2 + VideoMAE + pose": [0, 1, 2], "#9: #7 + LoRA16": [0, 1, 2, 3],
-              "#13 (final): #9 + LoRA16-MLP": [0, 1, 2, 3, 4]}
+# Kolom X: 0 LoRA16-MLP (anotasi), 1 V-JEPA 2, 2 VideoMAE, 3 pose, 4 LoRA16, 5 LoRA16-MLP (onset).
+CANDIDATES = {"#7: V-JEPA 2 + VideoMAE + pose (label onset)": ([1, 2, 3], y_onset),
+              "#9: #7 + LoRA16 (label onset)": ([1, 2, 3, 4], y_onset),
+              "final lama stack_a30: #9 + LoRA16-MLP onset": ([1, 2, 3, 4, 5], y_onset),
+              "FINAL stack_gold: #9 + LoRA16-MLP anotasi": ([0, 1, 2, 3, 4], y_fit)}
 rows = []
-for name, cols in CANDIDATES.items():
+for name, (cols, y_train) in CANDIDATES.items():
     for rule, thr in (("thr dipilih per fold", None), (f"thr {THR}", THR)):
-        prob, pred = nested(cols, thr)
-        f1 = {s: f1_score(proxy[s], pred, average="macro") for s in proxy}
-        rows.append({"stack": name, "threshold": rule, "F1 proksi 7s": f1[7], "F1 proksi 8s": f1[8],
-                     "F1 rata-rata": np.mean(list(f1.values())),
-                     "AUC rata-rata": np.mean([roc_auc_score(proxy[s], prob) for s in proxy])})
+        prob, pred = nested(cols, y_train, thr)
+        rows.append({"stack": name, "threshold": rule, "F1 emas": f1_score(gold, pred, average="macro"),
+                     "AUC emas": roc_auc_score(gold, prob),
+                     "F1 proksi 7s/8s": np.mean([f1_score(proxy[s], pred, average="macro") for s in proxy])})
 display(pd.DataFrame(rows).set_index(["stack", "threshold"]).round(4))
 
-full = LogisticRegression(C=1.0, max_iter=2000).fit(X, y)
+full = LogisticRegression(C=1.0, max_iter=2000).fit(X[:, :5], y_fit)
 print("Koefisien stacking final (dilatih di seluruh OOF):")
 print(pd.Series(full.coef_[0], index=STACK).round(3).to_string(), f"\\nintercept {full.intercept_[0]:.3f}")"""
 
@@ -307,18 +362,18 @@ Kiri: rata-rata probabilitas curang (nested OOF stack final) per detik. Video cu
 inilah alasan label per jendela. Kanan: F1-macro nested terhadap threshold. Kurvanya datar di sekitar 0.40-0.55,
 sehingga threshold tetap 0.43 aman."""
 
-C_PLOTS = """prob13, pred13 = nested(list(range(len(STACK))), THR)
+C_PLOTS = """prob13, pred13 = nested([0, 1, 2, 3, 4], y_fit, THR)
 sec = ((base.start + 15) // 30).to_numpy()
 fig, ax = plt.subplots(1, 2, figsize=(13, 4))
 for flag, name in ((True, "video curang"), (False, "video normal")):
-    m = cheat_video.to_numpy() == flag
+    m = cheat_video == flag
     curve = pd.Series(prob13[m]).groupby(sec[m]).mean()
     ax[0].plot(curve.index, curve.values, marker="o", label=name)
 ax[0].axhline(THR, color="gray", ls="--", lw=1, label=f"threshold {THR}")
 ax[0].set(xlabel="detik ke- (titik tengah jendela)", ylabel="rata-rata p_cheat", title="Probabilitas curang per detik")
 ax[0].legend()
 grid = np.round(np.arange(0.2, 0.81, 0.01), 2)
-labels = {"proksi 7s": proxy[7], "proksi 8s": proxy[8], "onset tabel": y}
+labels = {"label emas": gold, "proksi 7s": proxy[7], "proksi 8s": proxy[8]}
 for name, target in labels.items():
     ax[1].plot(grid, [f1_score(target, prob13 >= t, average="macro") for t in grid], label=name)
 ax[1].axvline(THR, color="gray", ls="--", lw=1)
@@ -328,26 +383,55 @@ plt.tight_layout()
 plt.show()
 
 behavior = base.video_id.str.extract(r"_(?:front|side)_(.+)$")[0]
-tab = pd.DataFrame({"perilaku": behavior, "label": y, "pred": pred13})
+tab = pd.DataFrame({"perilaku": behavior, "label": gold, "pred": pred13})
 summary = tab.groupby(["perilaku", "label"]).pred.agg(["mean", "size"]).unstack("label")
 summary.columns = [f"{'frac. diprediksi curang' if c == 'mean' else 'n jendela'} (label {lab})"
                    for c, lab in summary.columns]
-print("Label 1 = jendela curang sesudah onset (fraksi = recall); label 0 = jendela normal (fraksi = false positive).")
+print("Label emas 1 = jendela curang (fraksi = recall); label 0 = jendela normal (fraksi = false positive).")
 summary.round(3)"""
+
+MD_ANNOT = """### 5.4 Statistik anotasi manual
+
+Dihitung dari file anotasi di dataset kode: `configs/cheat_intervals.json` (putaran 1) dan
+`configs/cheat_intervals_v2.json` (putaran 2). Durasi video didekati dari jendela OOF. IoU = irisan / gabungan
+frame yang ditandai pada video yang dianotasi di kedua putaran (kesepakatan antar-putaran)."""
+
+C_ANNOT = """IV1 = load_intervals(CODE / "configs" / "cheat_intervals.json")
+n_frames = (base.groupby("video_id").start.max() + 30).to_dict()
+rows = []
+for vid, n in n_frames.items():
+    if vid not in IV2:
+        continue
+    m1, m2 = np.zeros(n, bool), np.zeros(n, bool)
+    for s, e in IV2[vid]:
+        m2[s:e] = True
+    for s, e in IV1.get(vid, []):
+        m1[s:e] = True
+    rows.append({"perilaku": vid.split("_", 3)[3], "putaran 1": vid in IV1, "interval / video": len(IV2[vid]),
+                 "fraksi frame ditandai": m2.mean(),
+                 "IoU putaran 1 vs 2": (m1 & m2).sum() / max((m1 | m2).sum(), 1) if vid in IV1 else np.nan})
+ann = pd.DataFrame(rows)
+print(f"putaran 2: {len(IV2)} video curang, putaran 1: {len(IV1)} video")
+stats = ann.groupby("perilaku").agg(video=("putaran 1", "size"), video_putaran_1=("putaran 1", "sum"),
+                                    interval_per_video=("interval / video", "mean"),
+                                    fraksi_ditandai=("fraksi frame ditandai", "mean"),
+                                    IoU_putaran_1_vs_2=("IoU putaran 1 vs 2", "mean"))
+stats.round(3)"""
 
 MD_INFER = """## 6. Inferensi test dan `submission.csv`
 
 Langkah-langkah di bawah memakai **model yang sudah dilatih** (tanpa training ulang):
 
 1. Folder run: config dan OOF dari `dataslayer-runs`, checkpoint 5 fold (`fold*.pt`) dari dataset checkpoint.
-2. Fitur YOLO-pose beku untuk klip test saja: kotak orang YOLO11s (untuk crop model video) dan keypoint YOLO26s (untuk
-   head pose).
-3. Prediksi tiap model: rata-rata 5 checkpoint fold, versi asli dan flip. T4 tidak mendukung bf16, jadi dipakai fp16.
+2. Fitur YOLO-pose beku di **ke-30 frame** setiap klip test: kotak orang YOLO11s (untuk crop model video) dan
+   keypoint YOLO26s (untuk head pose).
+3. Prediksi tiap model: rata-rata 5 checkpoint fold; model video memakai dua view (frame genap + ganjil = ke-30 frame),
+   versi asli dan flip. T4 tidak mendukung bf16, jadi dipakai fp16.
 4. Stacking: logistic regression di OOF (sama dengan bagian 5.2), diterapkan ke setiap klip test sendiri-sendiri,
    threshold 0.43, lalu `submission.csv`.
 
 **Setiap klip test diprediksi sendiri-sendiri** (FAQ 27/38/39). Batch hanya untuk kecepatan: tidak ada statistik,
-urutan, pengelompokan, atau pseudo-label dari test (FAQ 35). Runtime di GPU T4 sekitar 95 menit.
+urutan, pengelompokan, atau pseudo-label dari test (FAQ 35). Runtime di GPU T4 sekitar 3 jam (batas Kaggle 12 jam).
 
 ### 6.1 Model terlatih (checkpoint)
 
@@ -355,9 +439,9 @@ urutan, pengelompokan, atau pseudo-label dari test (FAQ 35). Runtime di GPU T4 s
 |---|---|---|
 | V-JEPA 2 ViT-L | `dataslayer-ckpt-vjepa2-l-crop-win` | `fold0.pt` ... `fold4.pt` |
 | V-JEPA 2 + LoRA16 | `dataslayer-ckpt-vjepa2-l-lora16-crop-win` | `fold0.pt` ... `fold4.pt` |
-| V-JEPA 2 + LoRA16-MLP | `dataslayer-ckpt-vjepa2-l-lora16mlp-e4-crop-win` | `fold0.pt` ... `fold4.pt` |
+| V-JEPA 2 LoRA16-MLP (anotasi) | `dataslayer-ckpt-vjepa2-l-lora16mlp-e4-crop-gold` | `fold0.pt` ... `fold4.pt` |
 | VideoMAE-B | `dataslayer-ckpt-videomae-b-crop-win` | `fold0.pt` ... `fold4.pt` |
-| Head pose YOLO26s | `dataslayer-runs` | `feat_pose_y26s_win/fold*/best.pt` |
+| Head pose YOLO26s | `dataslayer-runs` | `feat_pose_y26s_a30_win/fold*/best.pt` |
 
 Kode lengkap (training, label onset, stacking, test) ada di dataset `dataslayer-src`."""
 
@@ -376,7 +460,7 @@ for run in RUNS:
     print(f"{run}: {len(pts)} checkpoint, {sum(p.stat().st_size for p in pts) / 1e9:.2f} GB")"""
 
 C_EXTRACT = """# Fitur YOLO-pose beku untuk klip test saja (cache ini tidak berisi video train).
-POSE_CFG = CODE / "configs" / "feat_pose.yaml"
+POSE_CFG = CODE / "configs" / "feat_pose_a30.yaml"  # features.stride 1: setiap frame
 sh(f"python -m cli.extract --config {POSE_CFG} --set {PATHS} features.backbone=yolo11s-pose --workers 4")
 sh(f"python -m cli.extract --config {POSE_CFG} --set {PATHS} --workers 4")"""
 
@@ -395,9 +479,9 @@ if sub.label.isna().any():
     raise RuntimeError("submission ids differ from sample_submission.csv")
 sub = sub.reset_index().astype({"label": int})
 sub.to_csv(WORK / "submission.csv", index=False)
-ref = pd.read_csv(RUNS_IN / "reference" / "stack_best3_t043_submission.csv").set_index("id").label.reindex(sub.id)
+ref = pd.read_csv(RUNS_IN / "reference" / "stack_gold_submission.csv").set_index("id").label.reindex(sub.id)
 print(f"submission.csv: {len(sub)} baris, rasio curang {sub.label.mean():.3f}, "
-      f"berbeda dari submission final #13 di {(sub.label.to_numpy() != ref.to_numpy()).sum()} klip")
+      f"berbeda dari referensi A100 (bf16) di {(sub.label.to_numpy() != ref.to_numpy()).sum()} klip")
 sub.head()"""
 
 MD_LOSERS = """## 7. Eksperimen yang dibuang dan pelajaran
@@ -413,13 +497,18 @@ MD_LOSERS = """## 7. Eksperimen yang dibuang dan pelajaran
 | 10 | #9 + LoRA16-MLP dengan onset versi 2 | 0.8604 | onset versi 2 merugikan (kedua kalinya) |
 | 11 | #9 + LoRA16-MLP 4 epoch, threshold OOF 0.53 | 0.8536 | threshold terlalu tinggi |
 | 12 | #7 dengan threshold 0.38 | 0.8745 | menurunkan threshold tidak membantu |
-| **13** | **#11 dengan threshold tetap 0.43** | **0.8738** | **final**: nested CV terbaik (0.865) |
+| 13 | #11 dengan threshold tetap 0.43 | 0.8738 | nested CV terbaik; inferensi 16 dari 30 frame |
+| final lama | #13 dengan ke-30 frame (bagian 3.6) | 0.8738 | FAQ 66/70, beda 5 klip dari #13 |
+| **final** | **LoRA16-MLP dilatih ulang dengan label anotasi manual** (bagian 3.2) | **0.8811** | **dipilih** |
 
-**Kenapa #13 dan bukan #7 yang skor public-nya sedikit lebih tinggi?** Selisih public 0.0026 setara sekitar 1 klip
-dari sekitar 450 klip public, sedangkan nested CV (seluruh 26 subjek train) memihak #13 dengan selisih sekitar 0.02
-(tabel 5.2; bootstrap per subjek terhadap #9: 95% interval di atas 0). Skor akhir dihitung dari 70% klip private,
-jadi kami memilih bukti validasi yang lebih kuat. Selain itu, checkpoint model asli #7 tidak tersimpan, sedangkan
-#13 dibuat ulang persis oleh notebook ini.
+Submission #2-#13 memakai 16 dari 30 frame per klip saat inferensi. Setelah FAQ 66/70 kami ubah inferensinya agar
+memproses ke-30 frame, tanpa melatih ulang model video. Skor public tetap 0.8738, dan nested CV pada threshold 0.43
+hampir sama (0.8623 vs 0.8624).
+
+**Kenapa bukan #7 yang skor public-nya sedikit lebih tinggi?** Selisih public 0.0026 setara sekitar 1 klip dari
+sekitar 450 klip public, sedangkan nested CV (seluruh 26 subjek train) memihak stack 5 model dengan selisih sekitar
+0.02 (tabel 5.2; bootstrap per subjek terhadap #9: 95% interval di atas 0). Skor akhir dihitung dari 70% klip
+private, jadi kami memilih bukti validasi yang lebih kuat. Selain itu, checkpoint model asli #7 tidak tersimpan.
 
 ### 7.2 Sudah dicoba lalu dibuang
 
@@ -435,6 +524,12 @@ jadi kami memilih bukti validasi yang lebih kuat. Selain itu, checkpoint model a
 | Rata-rata geometrik bobot sama / stacking di 24 log-prob perilaku | nested 0.834 / 0.821 | stacking LR lebih baik |
 | Threshold terpisah per kamera | tidak membantu | satu threshold global |
 | Memilih epoch terbaik per fold | OOF optimistis 0.02-0.04 | diganti jumlah epoch tetap |
+| V-JEPA 2 langsung 30 frame (tanpa dua view) | AUC turun di 2 dari 3 model, stack -0.001 | dua view dipertahankan |
+| LoRA16-MLP / LoRA16 dilatih label putaran 2 | nested emas 0.9209 / 0.9194 (perlu >= 0.926) | AUC naik, F1 tidak |
+| Stream gaze: Gaze-LLE beku + keypoint (FAQ 57) | AUC 0.851; stack +0.0001 | tidak menambah |
+| Mosaik tangan + kepala (crop per bagian tubuh) | fold 0: AUC 0.973, gabungan -0.005 | info sama dengan crop orang |
+| Stacking dilatih label "hull" (awal-akhir aksi) | lebih buruk di label hull sendiri | aturan 50% dipertahankan |
+| Stacking non-negatif / regularisasi L2 | +0.0002 | tidak menambah |
 
 ### 7.3 Pelajaran
 
@@ -444,6 +539,8 @@ jadi kami memilih bukti validasi yang lebih kuat. Selain itu, checkpoint model a
 - **Kenaikan di bawah 0.01 tidak terlihat di public LB** (~450 klip). Jangan memilih final hanya dari public LB.
 - **Threshold penting di test walau kurva OOF datar:** stack yang sama mendapat 0.8536 di threshold 0.53 dan 0.8738 di
   0.43.
+- **Anotasi manual 30 fps** memberi kenaikan terbesar setelah label per jendela (+0.007 public, AUC model +0.013).
+  Label evaluasi dibuat dalam mode buta agar tidak terpengaruh usulan model.
 - **Sisa kesalahan terbesar ada di Repeated_Peeking** (sering tertukar dengan Looking_Around, tabel 5.3). Perilakunya
   terputus-putus, jadi sebagian detik di dalamnya kemungkinan berlabel normal di test."""
 
@@ -455,23 +552,30 @@ Semua perintah dari root kode (`dataslayer-src`), dengan `src` di `PYTHONPATH`:
 
 ```bash
 python -m cli.prepare --config configs/feat_pose.yaml --workers 6        # frame gaya test + fold per subjek
-python -m cli.extract --config configs/feat_pose.yaml --set features.backbone=yolo11s-pose   # kotak orang
-python -m cli.extract --config configs/feat_pose.yaml                    # keypoint YOLO26s
-python -m cli.train --config configs/feat_pose.yaml && python -m cli.predict --config configs/feat_pose.yaml
+python -m cli.extract --config configs/feat_pose.yaml --set features.backbone=yolo11s-pose   # kotak (training)
+python -m cli.extract --config configs/feat_pose_a30.yaml --set features.backbone=yolo11s-pose  # kotak, tiap frame
+python -m cli.extract --config configs/feat_pose_a30.yaml                # keypoint YOLO26s, tiap frame
+python -m cli.train --config configs/feat_pose_a30.yaml && python -m cli.predict --config configs/feat_pose_a30.yaml
 python -m cli.onsets --oof <oof.csv model label-video> --out configs/onsets.csv   # onset dari OOF train
 # Model video di GPU A100 (Colab), checkpoint di-upload ke dataset Kaggle:
 bash colab/run_job.sh --ckpt configs/colab_vjepa2_win.yaml configs/colab_videomae_win.yaml \\
     configs/colab_vjepa2_lora16_win.yaml configs/colab_vjepa2_lora16mlp_e4_win.yaml
-python -m cli.stack --runs outputs/vjepa2_l_crop_win@flip outputs/videomae_b_crop_win@flip outputs/feat_pose_y26s_win \\
-    outputs/vjepa2_l_lora16_crop_win@flip outputs/vjepa2_l_lora16mlp_e4_crop_win@flip --out outputs/stack_best3
+# OOF + test ulang dengan ke-30 frame dari checkpoint tersebut -> outputs/<run>_a30 (cli.predict --oof, lalu test):
+START=vm_rescore.py bash colab/run_job.sh configs/colab_vjepa2_win.yaml configs/colab_videomae_win.yaml \\
+    configs/colab_vjepa2_lora16_win.yaml configs/colab_vjepa2_lora16mlp_e4_win.yaml
+python -m cli.annotate --out configs/cheat_intervals.json          # anotasi manual (localhost), bagian 3.2
+bash colab/run_job.sh --ckpt configs/colab_vjepa2_lora16mlp_e4_gold.yaml   # LoRA16-MLP dengan label anotasi
+python -m cli.stack --runs outputs/vjepa2_l_lora16mlp_e4_crop_gold@flip outputs/vjepa2_l_crop_win_a30@flip \\
+    outputs/videomae_b_crop_win_a30@flip outputs/feat_pose_y26s_a30_win \\
+    outputs/vjepa2_l_lora16_crop_win_a30@flip --out outputs/stack_gold   # submission = test_probs >= 0.43
 ```
 
 ### 8.2 Seed dan determinisme
 
 - Seed 42 dipakai untuk pembagian fold dan training (`train.seed`, fold k memakai seed 42 + k); diperiksa di sel 5.1.
 - Inferensi tidak memakai keacakan (tanpa augmentasi acak, flip bersifat tetap). Satu-satunya sumber perbedaan adalah
-  presisi GPU: model dilatih di A100 (bf16) dan notebook ini berjalan di T4 (fp16). Untuk submission final, selisihnya
-  0 dari 1515 klip (sel terakhir bagian 6).
+  presisi GPU: referensi dibuat di A100 (bf16) dan notebook ini berjalan di T4 (fp16). Jumlah klip yang berbeda dari
+  submission final dicetak di sel terakhir bagian 6.
 
 ### 8.3 Kepatuhan aturan
 
@@ -480,13 +584,17 @@ python -m cli.stack --runs outputs/vjepa2_l_crop_win@flip outputs/videomae_b_cro
 | Tanpa data eksternal; pretrained boleh | hanya bobot pretrained publik (Hugging Face, YOLO COCO) |
 | Tanpa VLM, API pihak ketiga, atau prediksi zero-shot | semua model dilatih di data train dan dijalankan lokal |
 | Setiap klip test diprediksi sendiri (FAQ 27/38/39) | crop, fitur, prediksi, dan stacking per klip |
+| Ke-30 frame wajib diproses, juga saat ekstraksi fitur (FAQ 66/70) | dua view model video + pose/kotak tiap frame |
 | Tanpa statistik test, pseudo-label, transductive (FAQ 35/39) | stacking dan threshold dari OOF train saja |
 | Anotasi onset train boleh, tanpa informasi test (FAQ 30/40) | onset dari kurva OOF train (`cli.onsets`) |
+| Anotasi manual train oleh manusia, prosesnya ditunjukkan (FAQ 30/47/52) | `cli.annotate`, statistik bagian 5.4 |
+| Tanpa anotasi oleh AI/VLM (FAQ 45) | manusia menandai tiap interval; usulan model sendiri = titik awal (FAQ 50.1/51) |
 | Tanpa prediksi manual | semua label test berasal dari model |"""
 
 cells = [("markdown", MD_INTRO), ("markdown", MD_DATA), ("markdown", MD_EDA), ("markdown", MD_METHOD),
          ("markdown", MD_VALID), ("code", C_SETUP), ("markdown", MD_RESULTS), ("code", C_RECIPE),
          ("markdown", MD_OOF), ("code", C_OOF), ("code", C_NESTED), ("markdown", MD_PLOTS), ("code", C_PLOTS),
+         ("markdown", MD_ANNOT), ("code", C_ANNOT),
          ("markdown", MD_INFER), ("code", C_LINK), ("code", C_EXTRACT), ("code", C_PREDICT), ("code", C_SUBMIT),
          ("markdown", MD_LOSERS), ("markdown", MD_REPRO)]
 nb = {"cells": [{"cell_type": k, "id": f"c{i}", "metadata": {}, "source": src,
@@ -504,7 +612,7 @@ meta = {"id": "ridwansigma/dataslayer-final", "title": "dataslayer-final", "code
                             "ridwansigma/dataslayer-ckpt-vjepa2-l-crop-win",
                             "ridwansigma/dataslayer-ckpt-videomae-b-crop-win",
                             "ridwansigma/dataslayer-ckpt-vjepa2-l-lora16-crop-win",
-                            "ridwansigma/dataslayer-ckpt-vjepa2-l-lora16mlp-e4-crop-win"],
+                            "ridwansigma/dataslayer-ckpt-vjepa2-l-lora16mlp-e4-crop-gold"],
         "competition_sources": ["data-slayer-4"], "kernel_sources": [], "model_sources": [],
         "machine_shape": "NvidiaTeslaT4"}
 (out / "kernel-metadata.json").write_text(json.dumps(meta, indent=2))

@@ -20,6 +20,19 @@ def frame_indices(start: int, clip_len: int, num_frames: int, jitter: bool, rng:
     return start + np.minimum(pos.astype(int), clip_len - 1)
 
 
+def eval_views(start: int, clip_len: int, num_frames: int, passes: int) -> list[np.ndarray]:
+    """Frame indices of the evaluation views of a window. One pass = the evenly spaced frames of `frame_indices`;
+    `passes` > 1 splits the window into interleaved phases (frames p, p + passes, ...), each resampled to `num_frames`,
+    so the views together use every frame of the window."""
+    if passes == 1:
+        return [frame_indices(start, clip_len, num_frames, False, np.random.default_rng())]
+    phases = [np.arange(p, clip_len, passes) for p in range(passes)]
+    views = [start + ph[np.round(np.linspace(0, len(ph) - 1, num_frames)).astype(int)] for ph in phases]
+    if len(np.unique(np.concatenate(views))) != clip_len:
+        raise ValueError(f"{passes} views of {num_frames} frames cannot cover a {clip_len}-frame window")
+    return views
+
+
 def load_frames(paths: list[Path], size_hw: list[int], box: tuple[float, ...] | None = None) -> torch.Tensor:
     """Reads JPEGs into a uint8 tensor (T, 3, H, W), optionally cropped to a fractional (x1, y1, x2, y2) box, resized
     with area interpolation."""
@@ -87,6 +100,12 @@ def load_clip(paths: list[Path], poses: np.ndarray | None, cfg: DataConfig) -> t
     return load_frames(paths, cfg.img_size, None if poses is None else person_box(poses, cfg.person_crop, cfg.img_size))
 
 
+def load_views(views: list[list[Path]], poses: np.ndarray | None, cfg: DataConfig) -> torch.Tensor:
+    """Input of one window: (T, 3, H, W) for a single view, else the views stacked as (V, T, 3, H, W)."""
+    clips = [load_clip(paths, poses, cfg) for paths in views]
+    return clips[0] if len(clips) == 1 else torch.stack(clips)
+
+
 class VideoClipDataset(Dataset):
     """Clips from cached train videos.
 
@@ -128,9 +147,10 @@ class VideoClipDataset(Dataset):
             j = self.cfg.speed_jitter
             length = min(row.n_frames, round(length * self.rng.uniform(1 - j, 1 + j)))
             start = int(self.rng.integers(0, row.n_frames - length + 1))
-        ids = frame_indices(start, length, self.cfg.num_frames, self.train, self.rng)
-        paths = [self.frames_dir / row.video_id / f"{i:05d}.jpg" for i in ids]
-        clip = load_clip(paths, self.clip_poses(vi, start, length), self.cfg)
+        views = ([frame_indices(start, length, self.cfg.num_frames, True, self.rng)] if self.train
+                 else eval_views(start, length, self.cfg.num_frames, self.cfg.eval_passes))
+        clip = load_views([[self.frames_dir / row.video_id / f"{i:05d}.jpg" for i in v] for v in views],
+                          self.clip_poses(vi, start, length), self.cfg)
         behavior, label = window_target(row, start, length)
         return {"inputs": clip if self.augment is None else self.augment(clip), "behavior": behavior, "label": label,
                 "video": vi, "start": start}
@@ -155,11 +175,11 @@ class SequenceDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor | int]:
         frames = sorted(self.seqs[idx].glob("*.jpg"))
-        ids = frame_indices(0, len(frames), self.cfg.num_frames, False, np.random.default_rng())
+        views = eval_views(0, len(frames), self.cfg.num_frames, self.cfg.eval_passes)
         poses = None
         if self.crop_dir is not None:
             poses = np.load(self.crop_dir / "test" / f"{self.seqs[idx].name}.npy")[:, 0].astype(np.float32)
-        return {"inputs": load_clip([frames[i] for i in ids], poses, self.cfg), "index": idx}
+        return {"inputs": load_views([[frames[i] for i in v] for v in views], poses, self.cfg), "index": idx}
 
     @property
     def ids(self) -> list[str]:

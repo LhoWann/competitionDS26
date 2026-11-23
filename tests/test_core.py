@@ -9,9 +9,18 @@ import torch
 import yaml
 from accelerate import Accelerator
 
+from cli.annotate import video_table
 from core.config import load_config
-from dataset.clips import SequenceDataset, VideoClipDataset, frame_indices, person_box, roi_boxes
+from dataset.clips import (
+    SequenceDataset,
+    VideoClipDataset,
+    eval_views,
+    frame_indices,
+    person_box,
+    roi_boxes,
+)
 from dataset.features import FeatureClipDataset, FeatureSequenceDataset
+from dataset.intervals import load_intervals, marked_fraction, save_intervals
 from dataset.labels import BEHAVIORS, CHEAT_IDS, IGNORE_BEHAVIOR, window_target
 from dataset.onsets import curve_onset, estimate_onsets
 from dataset.prepare import build_index, extract_video
@@ -20,7 +29,7 @@ from evaluation.metrics import best_threshold, binary_metrics, evaluate_clips
 from evaluation.stack import stack
 from features.extract import extract
 from features.pose import POSE_DIM, pose_vector
-from inference.predict import predict
+from inference.predict import predict, predict_oof
 from models.clip_classifier import LoRALinear, cheat_log_probs
 from training.cv import load_videos, pending_folds, run, summarize
 from training.engine import build_model, predictions_frame, train_fold
@@ -53,6 +62,36 @@ def test_frame_indices_cover_clip():
     assert len(idx) == 8 and idx.min() >= 30 and idx.max() <= 59 and np.all(np.diff(idx) > 0)
     jit = frame_indices(0, 30, 8, True, rng)
     assert jit.min() >= 0 and jit.max() <= 29
+
+
+def test_cheat_intervals_roundtrip_and_dominance(tmp_path):
+    path = tmp_path / "iv.json"
+    save_intervals(path, {"b": [[50, 60], [0, 10], [5, 20]], "a": []})
+    iv = load_intervals(path)
+    assert iv == {"a": [], "b": [[0, 20], [50, 60]]} and load_intervals(tmp_path / "missing.json") == {}
+    assert marked_fraction(iv["b"], 0, 30) == pytest.approx(20 / 30) and marked_fraction(iv["b"], 45, 30) == 1 / 3
+    behaviors = ["Thinking", "Repeated_Peeking", "Using_Smartwatch"]
+    videos = pd.DataFrame({"video_id": ["n", "p", "w"], "behavior": behaviors, "view": "front", "subject": "s1",
+                           "n_frames": [90, 60, 60]})
+    oof = pd.DataFrame({"video_id": ["p", "p", "w"], "start": [30, 0, 0], "p_cheat": [0.9, 0.1, 0.2],
+                        "label": [1, 1, 1]})
+    table = video_table(videos, oof, pd.Series({"p": 45}), {"w": [[0, 30]]})
+    assert [v["video_id"] for v in table] == ["p", "w"] and table[0]["curve"] == [[0, 0.1], [30, 0.9]]
+    assert [v["video_id"] for v in video_table(videos, oof.assign(p_cheat=[0.9, 0.9, 0.1]), {}, {}, True)] == ["w", "p"]
+    assert table[0]["intervals"] is None and table[1]["intervals"] == [[0, 30]] and table[1]["onset"] == -1
+    assert table[0]["proposal"] == [[30, 60]] and table[1]["proposal"] == []
+    blind = video_table(videos, oof.iloc[:0], pd.Series({"p": 45}), {})
+    assert all(v["curve"] == [] and v["proposal"] == [] for v in blind)
+
+
+def test_eval_views_use_every_frame():
+    views = eval_views(30, 30, 16, 2)
+    assert len(views) == 2 and all(len(v) == 16 and np.all(np.diff(v) >= 0) for v in views)
+    assert sorted(set(np.concatenate(views))) == list(range(30, 60))
+    assert set(views[0]) == set(range(30, 60, 2)) and set(views[1]) == set(range(31, 60, 2))
+    assert np.array_equal(eval_views(0, 30, 16, 1)[0], frame_indices(0, 30, 16, False, np.random.default_rng()))
+    with pytest.raises(ValueError, match="cover"):
+        eval_views(0, 30, 8, 2)
 
 
 def test_metrics():
@@ -118,6 +157,15 @@ def test_window_labels_before_onset(fake_cache, tmp_path):
     pd.DataFrame({"video_id": videos.video_id[:2], "onset": 30}).to_csv(tmp_path / "onsets.csv", index=False)
     with pytest.raises(ValueError, match="no onset"):
         load_videos(cfg)
+    vid = cheat.video_id[0]
+    save_intervals(tmp_path / "iv.json", {vid: [[0, 10], [40, 60]]})
+    cfg = tiny_cfg(f"paths.cache_dir={tmp_path.as_posix()}", f"data.intervals={(tmp_path / 'iv.json').as_posix()}")
+    marked = load_videos(cfg).set_index("video_id").assign(onset=30)
+    assert marked.spans[vid] == [[0, 10], [40, 60]] and marked.spans.drop(vid).isna().all()
+    row = marked.loc[vid]
+    assert [window_target(row, s, 30) for s in (0, 30, 60)] == [
+        (IGNORE_BEHAVIOR, 0), (cheat.behavior_id[0], 1), (IGNORE_BEHAVIOR, 0)]
+    assert window_target(marked.drop(vid).iloc[-1], 30, 30) == window_target(cheat.iloc[-1], 30, 30)
 
 
 def test_clip_loss_skips_missing_behavior():
@@ -465,6 +513,28 @@ def test_train_then_predict_with_crops(video_cache, tmp_path):
     flip, sub_flip = (pd.read_csv(cfg.run_dir / f"{n}_flip.csv") for n in ("test_probs", "submission"))
     assert len(pd.read_csv(cfg.run_dir / "oof_flip.csv")) == 8 and flip.id.tolist() == ["test_seq_00001"]
     assert sub_flip.label.iloc[0] == int(flip.p_cheat.iloc[0] >= cv_flip["thr"])
+
+
+def test_rescore_oof_and_test_with_every_frame(video_cache, tmp_path):
+    frames_dir, videos = video_cache
+    seq = tmp_path / "data" / "test" / "test_seq_00001"
+    seq.mkdir(parents=True)
+    for i in range(8):
+        cv2.imwrite(str(seq / f"{i + 1:02d}.jpg"), np.full((36, 64, 3), 10 * i, np.uint8))
+    tmp = tmp_path.as_posix()
+    args = [f"paths.cache_dir={tmp}", f"paths.data_dir={tmp}/data", f"paths.output_dir={tmp}/out", "data.clip_len=8",
+            "data.num_workers=0", "train.folds=[0]", "train.epochs=1", "train.batch_size=2", "train.select=epoch",
+            "train.mixed_precision=no"]
+    run(tiny_cfg(*args))
+    cfg = tiny_cfg(*args, "data.eval_passes=2")
+    before = pd.read_csv(cfg.run_dir / "oof.csv")
+    assert VideoClipDataset(videos, frames_dir, cfg.data, train=False)[0]["inputs"].shape == (2, 4, 3, 64, 96)
+    cv = predict_oof(cfg)
+    after = pd.read_csv(cfg.run_dir / "oof.csv")
+    assert after[["video_id", "start", "label"]].equals(before[["video_id", "start", "label"]])
+    assert 0 <= cv["thr"] <= 1 and (cfg.run_dir / "oof_flip.csv").exists() and after.p_cheat.between(0, 1).all()
+    probs = predict(cfg)
+    assert probs.id.tolist() == ["test_seq_00001"] and probs.p_cheat.between(0, 1).all()
 
 
 def test_resume_skips_finished_folds_of_the_same_recipe(tmp_path):

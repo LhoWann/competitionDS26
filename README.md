@@ -3,13 +3,22 @@
 Input: potongan video **1 detik** (30 frame) seorang peserta ujian. Output: **0 = normal**
 atau **1 = curang**. Metrik: **F1-macro** (rata-rata F1 kelas normal dan kelas curang).
 
-Submission terbaik: **public LB 0.8764** (#7, `outputs/stack_win`): V-JEPA 2 + VideoMAE + head pose, dilatih dengan
-**label per jendela** (onset aksi), lalu digabung dengan **stacking logistic regression**.
+**Submission final: `stack_gold`** (Kaggle ref 58717548, 2026-11-22), **public 0.8811**, nested CV 0.920 terhadap
+label anotasi manual (0.865 proksi detik 7/8) @ thr 0.43: stack `stack_a30` dengan LoRA16-MLP 4 epoch **dilatih ulang
+dengan label dari anotasi manual 30 fps** (`cli.annotate`, `configs/cheat_intervals.json`, `data.intervals`; jendela
+curang jika >= 50% frame ditandai). Label emas validasi = anotasi putaran 2 dalam mode buta
+(`configs/cheat_intervals_v2.json`). Notebook laporan akhir `kaggle/final/` (kernel `dataslayer-final`) menjelaskan
+metode, menghitung ulang angka validasi dari OOF, dan menulis `submission.csv`.
 
-**Submission final (dipilih 2026-11-21, lomba hanya mengizinkan 1): #13**, public 0.8738, nested CV 0.865:
-#7 + V-JEPA 2 LoRA16 + V-JEPA 2 LoRA16-MLP 4 epoch, threshold tetap 0.43. Notebook laporan akhir `kaggle/final/`
-(kernel `dataslayer-final`) menjelaskan metode, menghitung ulang angka validasi dari OOF, dan menulis `submission.csv`
-yang sama persis dengan #13 (0 dari 1515 klip berbeda).
+Sebelumnya: `stack_a30` (ref 58679165, public 0.8738) = #13 dengan ke-30 frame; #7 (public 0.8764) label per jendela.
+Dicoba lalu ditolak (kodenya sudah dihapus; hasil di notebook final bagian 7.2): latih ulang dengan label putaran 2,
+stream gaze (Gaze-LLE), mosaik tangan + kepala, stacking label hull.
+
+**FAQ 66/70 (semua 30 frame wajib diproses, juga saat ekstraksi fitur).** #2-#13 memakai 16 dari 30 frame (model
+video) dan pose stride 2. Perbaikan tanpa training ulang model video: `data.eval_passes=2` (`dataset/clips.py:
+eval_views`, dua view frame genap/ganjil, log-prob dirata-rata), kotak crop + keypoint dari setiap frame
+(`configs/feat_pose_a30.yaml`, head pose dilatih ulang), OOF dihitung ulang dari checkpoint (`cli.predict --oof`,
+Colab `START=vm_rescore.py`). Hasil: nested @0.43 0.8623 vs 0.8624, public sama 0.8738, beda 5/1515 klip dari #13.
 
 #7 tidak dipilih: checkpoint aslinya hilang, model hasil training ulang berbeda 4-5 klip di threshold mana pun
 (hasil ulang di notebook: public 0.8697); selisih public #7 vs #13 hanya ~1 klip, sedangkan nested CV memihak #13
@@ -19,7 +28,7 @@ yang sama persis dengan #13 (0 dari 1515 klip berbeda).
 
 | Babak | Berkas | Status |
 |---|---|---|
-| Penyisihan (sampai 29 Nov) | submission Kaggle final | #13 dipilih |
+| Penyisihan (sampai 29 Nov) | submission Kaggle final | `stack_gold` (ref 58717548) - pilih di Kaggle |
 | Penyisihan (bobot nilai 35%) | notebook laporan akhir bahasa Indonesia + model terlatih (`.pt`), pakai seed | kernel `dataslayer-final` + dataset `dataslayer-src`, `dataslayer-runs`, 4 x `dataslayer-ckpt-*` (masih privat; cara kumpul menunggu info panitia) |
 | Final (kalau lolos, 17 Des 23.59 WIB, Google Form) | Technical Report (PDF) + slide presentasi (PDF/PPTX) | dibuat setelah pengumuman finalis 7 Des |
 
@@ -183,7 +192,7 @@ flowchart LR
 flowchart LR
     K[Klip 1 detik] --> BX[Kotak orang dari cache pose<br>klip itu sendiri]
     BX --> CR[Crop persegi + margin 15%<br>224 VideoMAE / 256 V-JEPA 2]
-    CR --> S16[Ambil 16 frame<br>tersebar merata]
+    CR --> S16[Training: 16 frame tersebar merata<br>Validasi/test: 2 view genap + ganjil = ke-30 frame]
     S16 --> VT[Video transformer<br>melihat 16 frame sekaligus]
     VT --> H[Head -> 8 skor perilaku]
     H --> PC[p_cheat = jumlah peluang<br>4 perilaku curang]
@@ -362,12 +371,14 @@ configs/                 satu file YAML = satu eksperimen (lihat komentar di bar
   colab_vjepa2_lora16mlp_e4_win.yaml  V-JEPA 2 + LoRA16 attention + MLP, 4 epoch (#13)
   colab_videomae_win.yaml VideoMAE-B + crop, label per jendela, 5 fold, stop_epoch 2 (Colab A100)
   feat_pose.yaml         head pose YOLO26s, label per jendela, 7 epoch (laptop); juga untuk cache kotak YOLO11s
+  feat_pose_a30.yaml     sama, keypoint/kotak dari setiap frame (stride 1, FAQ 66/70) -> run final
   onsets.csv             onset aksi per video (frame), dibuat cli.onsets
   debug.yaml             uji cepat seluruh alur di laptop
 colab/                   job Colab lewat CLI resmi Google (dijalankan dari WSL)
   run_job.sh             buat VM, upload, setup, training, unduh hasil, matikan VM
   vm_setup.py            di VM: kode, data dari Kaggle API, cache frame dan kotak
   vm_start.py            di VM: antrean train + predict di latar belakang
+  vm_rescore.py          di VM (START=vm_rescore.py): OOF + test ulang dari checkpoint dengan ke-30 frame -> <run>_a30
   vm_follow.py           di VM: tampilkan progres sampai antrean selesai, bungkus hasil
   vm_save.py             di VM: upload checkpoint tiap run ke dataset Kaggle privat dataslayer-ckpt-<run>
   login.sh               login Google sekali untuk CLI Colab
@@ -409,7 +420,7 @@ $env:PYTHONPATH = "src"
 # data lomba diekstrak ke data/ (kaggle competitions download -c data-slayer-4)
 .venv\Scripts\python -m cli.prepare --config configs/feat_pose.yaml --workers 6   # sekali, ~20 menit, 5 fold
 # Cache kotak orang untuk crop model video (YOLO11s) -> cache/features/yolo11s-pose_360x640_s2 (~17 menit),
-# lalu bungkus untuk Colab: tar -czf cache/pose_cache.tgz -C cache/features yolo11s-pose_360x640_s2
+# lalu bungkus untuk Colab: tar -czf cache/pose_cache.tgz -C cache/features yolo11s-pose_360x640_s2 yolo11s-pose_360x640_s1  # s1 untuk vm_rescore
 .venv\Scripts\python -m cli.extract --config configs/feat_pose.yaml --set features.backbone=yolo11s-pose --workers 4
 # Head pose YOLO26s, label per jendela
 .venv\Scripts\python -m cli.extract --config configs/feat_pose.yaml --workers 4
@@ -424,6 +435,14 @@ $env:PYTHONPATH = "src"
 .venv\Scripts\python -m cli.stack --runs outputs/vjepa2_l_crop_win@flip outputs/videomae_b_crop_win@flip `
     outputs/feat_pose_y26s_win outputs/vjepa2_l_lora16_crop_win@flip outputs/vjepa2_l_lora16mlp_e4_crop_win@flip `
     --out outputs/stack_best3
+# FINAL (ke-30 frame): head pose stride 1 + run video *_a30 dari Colab (START=vm_rescore.py), threshold tetap 0.43
+.venv\Scripts\python -m cli.extract --config configs/feat_pose_a30.yaml --set features.backbone=yolo11s-pose --workers 4
+.venv\Scripts\python -m cli.extract --config configs/feat_pose_a30.yaml --workers 4
+.venv\Scripts\python -m cli.train --config configs/feat_pose_a30.yaml
+.venv\Scripts\python -m cli.predict --config configs/feat_pose_a30.yaml
+.venv\Scripts\python -m cli.stack --runs outputs/vjepa2_l_crop_win_a30@flip outputs/videomae_b_crop_win_a30@flip `
+    outputs/feat_pose_y26s_a30_win outputs/vjepa2_l_lora16_crop_win_a30@flip `
+    outputs/vjepa2_l_lora16mlp_e4_crop_win_a30@flip --out outputs/stack_a30
 .venv\Scripts\python -m pytest -q
 ```
 

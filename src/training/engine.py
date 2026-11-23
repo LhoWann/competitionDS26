@@ -36,15 +36,20 @@ def make_loader(ds: torch.utils.data.Dataset, batch_size: int, num_workers: int,
 def run_inference(model: torch.nn.Module, loader: DataLoader, acc: Accelerator, keys: list[str],
                   hflip: bool = False) -> dict[str, np.ndarray]:
     """Returns gathered `logits` plus the requested batch `keys`, de-duplicated across processes; with `hflip` also
-    `logits_flip`, the mean log-probabilities of each clip and its mirror image (flip TTA)."""
+    `logits_flip`, the mean log-probabilities of each clip and its mirror image (flip TTA). Inputs of shape
+    (B, V, T, 3, H, W) hold V views of each clip (`data.eval_passes`); their log-probabilities are averaged."""
     model.eval()
     out: dict[str, list[torch.Tensor]] = {k: [] for k in ["logits", *(["logits_flip"] if hflip else []), *keys]}
     for batch in tqdm(loader, desc="infer" + " (+flip)" * hflip, leave=False, disable=not acc.is_local_main_process):
+        inputs = batch["inputs"]
+        views = inputs.unbind(1) if inputs.ndim == 6 else [inputs]
         with acc.autocast():
-            logits = model(batch["inputs"]).float()
+            raw = [model(v).float() for v in views]
+            logits = raw[0] if len(raw) == 1 else torch.stack([r.log_softmax(-1) for r in raw]).mean(0)
             flip = []
             if hflip:
-                flip = [(logits.log_softmax(-1) + model(batch["inputs"].flip(-1)).float().log_softmax(-1)) / 2]
+                flip = [torch.stack([(r.log_softmax(-1) + model(v.flip(-1)).float().log_softmax(-1)) / 2
+                                     for r, v in zip(raw, views, strict=True)]).mean(0)]
         gathered = acc.gather_for_metrics((logits, *flip, *[batch[k] for k in keys]))
         for k, v in zip(out, gathered, strict=True):
             out[k].append(v.cpu())

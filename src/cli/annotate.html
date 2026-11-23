@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anotasi Interval Curang</title>
+<style>
+  :root { --bg:#14161a; --panel:#1d2026; --text:#e6e6e6; --muted:#9aa0a6; --accent:#4caf50; --warn:#ff7043;
+          --line:#2c3038; --curve:#64b5f6; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, sans-serif; }
+  #app { display:grid; grid-template-columns:300px 1fr; height:100vh; }
+  #side { background:var(--panel); border-right:1px solid var(--line); display:flex; flex-direction:column;
+          min-height:0; }
+  #side header { padding:10px; border-bottom:1px solid var(--line); }
+  #list { overflow:auto; flex:1; }
+  .item { padding:5px 10px; cursor:pointer; border-bottom:1px solid var(--line); font-size:12px;
+          display:flex; justify-content:space-between; gap:6px; }
+  .item:hover { background:#262a31; }
+  .item.cur { background:#2f3b4d; }
+  .done { color:var(--accent); }
+  .todo { color:var(--muted); }
+  #main { padding:12px 16px; overflow:auto; }
+  #title { font-size:16px; font-weight:600; }
+  #stage { position:relative; width:960px; max-width:100%; }
+  canvas { display:block; width:100%; background:#000; }
+  #timeline { margin-top:6px; cursor:pointer; background:#0d0f12; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+  button, select { background:#2a2f37; color:var(--text); border:1px solid #3a404a; border-radius:4px;
+                   padding:5px 10px; cursor:pointer; font:inherit; }
+  button.primary { background:#2e7d32; border-color:#388e3c; }
+  button.danger { background:#5d2a22; border-color:#7a3a30; }
+  #spans span { display:inline-block; margin:2px; padding:2px 6px; background:#24452a; border-radius:3px;
+                cursor:pointer; font-size:12px; }
+  #rubric { font-size:12.5px; color:#c9cdd2; background:var(--panel); padding:8px 12px; border-radius:6px;
+            max-width:960px; }
+  #rubric b { color:#fff; }
+  .muted { color:var(--muted); }
+  kbd { background:#2a2f37; border:1px solid #3a404a; border-radius:3px; padding:0 4px; font-size:11px; }
+  #status { min-height:1.4em; color:var(--muted); }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <header>
+      <div><b>Video curang</b> <span id="progress" class="muted"></span></div>
+      <div class="row">
+        <select id="filter"></select>
+        <label class="muted"><input type="checkbox" id="onlyTodo"> belum saja</label>
+      </div>
+    </header>
+    <div id="list"></div>
+  </aside>
+  <main id="main">
+    <div class="row"><span id="title">Memuat...</span><span id="meta" class="muted"></span></div>
+    <div id="stage"><canvas id="view" width="640" height="360"></canvas></div>
+    <canvas id="timeline" width="960" height="90"></canvas>
+    <div class="row">
+      <button id="play">Putar (spasi)</button>
+      <select id="speed"><option value="0.5">0.5x</option><option value="1" selected>1x</option>
+        <option value="1.5">1.5x</option></select>
+      <span id="clock" class="muted"></span>
+      <label class="muted"><input type="checkbox" id="showCurve" checked> tampilkan kurva model</label>
+    </div>
+    <div class="row">
+      <button id="mStart">Mulai curang (S)</button>
+      <button id="mEnd">Selesai curang (E)</button>
+      <button id="undo" class="danger">Hapus interval terakhir (Backspace)</button>
+      <button id="none">Tidak ada curang (N)</button>
+      <button id="next" class="primary">Simpan &amp; berikutnya (Enter)</button>
+    </div>
+    <div class="row"><span class="muted">Interval (klik untuk hapus):</span><span id="spans"></span></div>
+    <div id="status"></div>
+    <div id="rubric">
+      <b>Yang ditandai:</b> rentang waktu ketika perilaku curang <b>benar-benar terlihat</b>. Label test = perilaku
+      dominan dalam 1 detik, jadi tandai aksinya saja, bukan jeda menulis di antaranya.
+      <br><b>Repeated_Peeking:</b> dari awal sampai akhir rangkaian lirikan berulang ke satu arah (contekan/kertas
+      teman). Jeda menulis di kertas sendiri yang lebih dari kira-kira 1 detik = <b>bukan</b> curang. Satu lirikan
+      singkat saja tidak perlu ditandai.
+      <br><b>Using_Smartwatch:</b> saat <b>mengoperasikan</b> jam (menyentuh/menggeser). Hanya melihat layar = normal.
+      <br><b>Reading_Hidden_Notes:</b> saat membaca contekan (termasuk mengambil/menyimpan jika bagian dari aksi).
+      Menulis sambil sesekali melirik = normal.
+      <br><b>Looking_Under_the_Desk:</b> saat melihat ke bawah meja.
+      <br><span class="muted">Kurva biru = prediksi model (hanya penunjuk, boleh diabaikan). Garis kuning =
+      onset lama. Video baru dibuka dengan <b>usulan model</b> (oranye, per 1 detik): tonton, geser batasnya
+      dengan Backspace + S/E, atau N jika tidak ada curang; jadi hijau setelah disimpan. Tombol: <kbd>spasi</kbd> putar, <kbd>&larr;</kbd><kbd>&rarr;</kbd> 1 frame,
+      <kbd>Shift</kbd>+panah 0.5 detik, <kbd>S</kbd>/<kbd>E</kbd> tandai, <kbd>Enter</kbd> simpan &amp; lanjut.
+      Klik timeline untuk lompat.</span>
+    </div>
+  </main>
+</div>
+<script>
+const FPS = 30, THR = 0.43;
+let videos = [], cur = null, frames = [], frame = 0, playing = false, startMark = null, spans = [];
+let lastTick = 0, acc = 0;
+const $ = id => document.getElementById(id);
+const view = $("view"), vctx = view.getContext("2d"), tl = $("timeline"), tctx = tl.getContext("2d");
+
+async function init() {
+  videos = await (await fetch("/api/videos")).json();
+  const behaviors = [...new Set(videos.map(v => v.behavior))];
+  $("filter").innerHTML = '<option value="">semua perilaku</option>' +
+    behaviors.map(b => `<option>${b}</option>`).join("");
+  $("filter").onchange = $("onlyTodo").onchange = renderList;
+  renderList();
+  const first = videos.find(v => v.intervals === null) || videos[0];
+  if (first) openVideo(first);
+}
+
+function renderList() {
+  const f = $("filter").value, todo = $("onlyTodo").checked;
+  const done = videos.filter(v => v.intervals !== null).length;
+  $("progress").textContent = `${done}/${videos.length} selesai`;
+  $("list").innerHTML = videos.filter(v => (!f || v.behavior === f) && (!todo || v.intervals === null))
+    .map(v => `<div class="item ${cur && v.video_id === cur.video_id ? "cur" : ""}" data-id="${v.video_id}">
+      <span>${v.video_id.replace("subject_", "s")}</span>
+      <span class="${v.intervals === null ? "todo" : "done"}">${v.intervals === null ? "-" :
+        v.intervals.length + " int"}</span></div>`).join("");
+  for (const el of document.querySelectorAll(".item"))
+    el.onclick = () => openVideo(videos.find(v => v.video_id === el.dataset.id));
+}
+
+function openVideo(v) {
+  cur = v; frame = 0; playing = false; startMark = null;
+  spans = (v.intervals === null ? v.proposal : v.intervals).map(s => s.slice());
+  $("title").textContent = v.video_id;
+  $("meta").textContent = `${v.behavior} | ${v.view} | ${(v.n_frames / FPS).toFixed(1)} s` +
+    (v.intervals === null ? " | USULAN MODEL (oranye, belum disimpan): tonton & koreksi" : " | sudah disimpan");
+  frames = [];
+  let loaded = 0;
+  for (let i = 0; i < v.n_frames; i++) {
+    const img = new Image();
+    img.onload = () => { loaded++; if (loaded % 60 === 0 || loaded === v.n_frames)
+      setStatus(`memuat frame ${loaded}/${v.n_frames}`); if (i === 0) draw(); };
+    img.src = `/frames/${v.video_id}/${String(i).padStart(5, "0")}.jpg`;
+    frames.push(img);
+  }
+  renderList(); renderSpans(); draw();
+}
+
+function setStatus(t) { $("status").textContent = t; }
+
+function draw() {
+  if (!cur) return;
+  const img = frames[frame];
+  if (img && img.complete && img.naturalWidth) vctx.drawImage(img, 0, 0, view.width, view.height);
+  $("clock").textContent = `frame ${frame} / ${cur.n_frames - 1}  |  ${(frame / FPS).toFixed(2)} s`;
+  drawTimeline();
+}
+
+function drawTimeline() {
+  const W = tl.width, H = tl.height, n = cur.n_frames, x = f => f / n * W;
+  tctx.clearRect(0, 0, W, H);
+  tctx.fillStyle = "#0d0f12"; tctx.fillRect(0, 0, W, H);
+  for (let s = 0; s < n; s += FPS) { tctx.fillStyle = "#1d2026"; tctx.fillRect(x(s), 0, 1, H); }
+  if ($("showCurve").checked) {
+    for (const [st, p] of cur.curve) {
+      tctx.fillStyle = p >= THR ? "rgba(100,181,246,0.55)" : "rgba(100,181,246,0.25)";
+      tctx.fillRect(x(st), H - 6 - p * (H - 30), x(st + FPS) - x(st) - 1, p * (H - 30));
+    }
+    tctx.fillStyle = "rgba(255,255,255,0.25)"; tctx.fillRect(0, H - 6 - THR * (H - 30), W, 1);
+  }
+  tctx.fillStyle = cur.intervals === null ? "rgba(255,152,0,0.85)" : "rgba(76,175,80,0.85)";
+  for (const [s, e] of spans) tctx.fillRect(x(s), 2, x(e) - x(s), 16);
+  if (startMark !== null) { tctx.fillStyle = "#ff7043"; tctx.fillRect(x(startMark) - 1, 0, 3, 20); }
+  if (cur.onset >= 0) { tctx.fillStyle = "#ffd54f"; tctx.fillRect(x(cur.onset), 0, 2, H); }
+  tctx.fillStyle = "#ef5350"; tctx.fillRect(x(frame), 0, 2, H);
+}
+
+function seek(f) { frame = Math.max(0, Math.min(cur.n_frames - 1, f)); draw(); }
+
+function tick(t) {
+  if (playing) {
+    acc += (t - lastTick) / 1000 * FPS * parseFloat($("speed").value);
+    const step = Math.floor(acc);
+    if (step > 0) { acc -= step; if (frame + step >= cur.n_frames) { frame = cur.n_frames - 1; playing = false; }
+                    else frame += step; draw(); }
+  }
+  lastTick = t; requestAnimationFrame(tick);
+}
+
+function togglePlay() { if (!cur) return; if (frame >= cur.n_frames - 1) frame = 0; playing = !playing; acc = 0; }
+
+function markStart() { startMark = frame; setStatus(`mulai ditandai di frame ${frame}`); draw(); }
+
+function markEnd() {
+  if (startMark === null) { setStatus("tandai MULAI dulu (S)"); return; }
+  const s = Math.min(startMark, frame), e = Math.max(startMark, frame) + 1;
+  spans.push([s, e]); startMark = null; save(`interval ${s}-${e} ditambahkan`);
+}
+
+function renderSpans() {
+  $("spans").innerHTML = spans.map((s, i) =>
+    `<span data-i="${i}">${(s[0] / FPS).toFixed(2)}-${(s[1] / FPS).toFixed(2)} s</span>`).join("") ||
+    '<span class="muted" style="background:none">belum ada</span>';
+  for (const el of document.querySelectorAll("#spans span[data-i]"))
+    el.onclick = () => { spans.splice(+el.dataset.i, 1); save("interval dihapus"); };
+}
+
+async function save(msg) {
+  const r = await fetch("/api/save", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ video_id: cur.video_id, intervals: spans }) });
+  if (!r.ok) { setStatus("GAGAL menyimpan!"); return false; }
+  cur.intervals = await r.json(); spans = cur.intervals.map(s => s.slice());
+  $("meta").textContent = `${cur.behavior} | ${cur.view} | ${(cur.n_frames / FPS).toFixed(1)} s | sudah disimpan`;
+  setStatus(`${msg} - tersimpan`); renderSpans(); renderList(); draw(); return true;
+}
+
+async function saveNext() {
+  if (!(await save("disimpan"))) return;
+  const i = videos.indexOf(cur);
+  const nxt = videos.slice(i + 1).find(v => v.intervals === null) || videos.find(v => v.intervals === null);
+  if (nxt) openVideo(nxt); else setStatus("Semua video sudah dianotasi. Terima kasih!");
+}
+
+tl.onclick = ev => { const r = tl.getBoundingClientRect(); seek(Math.round((ev.clientX - r.left) / r.width * cur.n_frames)); };
+$("play").onclick = togglePlay; $("mStart").onclick = markStart; $("mEnd").onclick = markEnd;
+$("undo").onclick = () => { spans.pop(); save("interval terakhir dihapus"); };
+$("none").onclick = () => { spans = []; save("ditandai: tidak ada curang"); };
+$("next").onclick = saveNext; $("showCurve").onchange = draw;
+document.addEventListener("keydown", ev => {
+  if (!cur || ev.target.tagName === "SELECT") return;
+  const k = ev.key, big = ev.shiftKey ? 15 : 1;
+  if (k === " ") { ev.preventDefault(); togglePlay(); }
+  else if (k === "ArrowLeft") { ev.preventDefault(); playing = false; seek(frame - big); }
+  else if (k === "ArrowRight") { ev.preventDefault(); playing = false; seek(frame + big); }
+  else if (k === "s" || k === "S") markStart();
+  else if (k === "e" || k === "E") markEnd();
+  else if (k === "Backspace") { ev.preventDefault(); spans.pop(); save("interval terakhir dihapus"); }
+  else if (k === "n" || k === "N") { spans = []; save("ditandai: tidak ada curang"); }
+  else if (k === "Enter") { ev.preventDefault(); saveNext(); }
+});
+requestAnimationFrame(t => { lastTick = t; tick(t); });
+init();
+</script>
+</body>
+</html>

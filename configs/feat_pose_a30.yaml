@@ -1,0 +1,28 @@
+# feat_pose.yaml with keypoints of EVERY frame (features.stride 1, 30 per clip): FAQ 66/70 require all 30 frames of a
+# test sequence to be processed, including feature extraction. Same head and fixed 7 epochs (no re-tuning).
+# Cache: `cli.extract --config configs/feat_pose_a30.yaml`; person-crop boxes for the video models from
+# `cli.extract --config configs/feat_pose_a30.yaml --set features.backbone=yolo11s-pose` (yolo11s-pose_360x640_s1).
+name: feat_pose_y26s_a30_win
+data:
+  num_workers: 0
+  onsets: configs/onsets.csv
+features:
+  backbone: yolo26s-pose
+  img_size: [360, 640]
+  stride: 1
+  batch_size: 32
+model:
+  kind: features
+  hidden: 128
+  dropout: 0.2
+  temporal_layers: 2
+  temporal_heads: 4
+train:
+  folds: [0, 1, 2, 3, 4]
+  epochs: 7
+  batch_size: 64
+  lr: 1.0e-3
+  select: epoch
+  patience: 99
+  ema: 0.99
+  mixed_precision: "no"

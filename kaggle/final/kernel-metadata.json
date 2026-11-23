@@ -14,7 +14,7 @@
     "ridwansigma/dataslayer-ckpt-vjepa2-l-crop-win",
     "ridwansigma/dataslayer-ckpt-videomae-b-crop-win",
     "ridwansigma/dataslayer-ckpt-vjepa2-l-lora16-crop-win",
-    "ridwansigma/dataslayer-ckpt-vjepa2-l-lora16mlp-e4-crop-win"
+    "ridwansigma/dataslayer-ckpt-vjepa2-l-lora16mlp-e4-crop-gold"
   ],
   "competition_sources": [
     "data-slayer-4"

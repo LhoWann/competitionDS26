@@ -1,0 +1,914 @@
+{
+ "subject_10_front_Repeated_Peeking": [
+  [
+   235,
+   360
+  ],
+  [
+   461,
+   531
+  ]
+ ],
+ "subject_10_front_Using_Smartwatch": [
+  [
+   240,
+   434
+  ]
+ ],
+ "subject_10_side_Repeated_Peeking": [
+  [
+   260,
+   375
+  ],
+  [
+   488,
+   543
+  ]
+ ],
+ "subject_10_side_Using_Smartwatch": [
+  [
+   240,
+   461
+  ]
+ ],
+ "subject_11_front_Repeated_Peeking": [
+  [
+   180,
+   296
+  ],
+  [
+   312,
+   340
+  ],
+  [
+   361,
+   439
+  ]
+ ],
+ "subject_11_front_Using_Smartwatch": [
+  [
+   247,
+   426
+  ]
+ ],
+ "subject_11_side_Repeated_Peeking": [
+  [
+   220,
+   321
+  ],
+  [
+   337,
+   372
+  ],
+  [
+   385,
+   460
+  ]
+ ],
+ "subject_11_side_Using_Smartwatch": [
+  [
+   273,
+   487
+  ]
+ ],
+ "subject_12_front_Repeated_Peeking": [
+  [
+   216,
+   285
+  ],
+  [
+   376,
+   430
+  ]
+ ],
+ "subject_12_front_Using_Smartwatch": [
+  [
+   237,
+   485
+  ]
+ ],
+ "subject_12_side_Repeated_Peeking": [
+  [
+   234,
+   304
+  ],
+  [
+   390,
+   452
+  ]
+ ],
+ "subject_12_side_Using_Smartwatch": [
+  [
+   244,
+   502
+  ]
+ ],
+ "subject_13_front_Repeated_Peeking": [
+  [
+   232,
+   335
+  ],
+  [
+   411,
+   500
+  ]
+ ],
+ "subject_13_front_Using_Smartwatch": [
+  [
+   254,
+   398
+  ]
+ ],
+ "subject_13_side_Repeated_Peeking": [
+  [
+   248,
+   351
+  ],
+  [
+   433,
+   505
+  ]
+ ],
+ "subject_13_side_Using_Smartwatch": [
+  [
+   261,
+   421
+  ]
+ ],
+ "subject_14_front_Repeated_Peeking": [
+  [
+   221,
+   307
+  ],
+  [
+   348,
+   409
+  ],
+  [
+   446,
+   450
+  ]
+ ],
+ "subject_14_front_Using_Smartwatch": [
+  [
+   224,
+   381
+  ],
+  [
+   409,
+   465
+  ]
+ ],
+ "subject_14_side_Repeated_Peeking": [
+  [
+   247,
+   325
+  ],
+  [
+   371,
+   425
+  ],
+  [
+   467,
+   470
+  ]
+ ],
+ "subject_14_side_Using_Smartwatch": [
+  [
+   243,
+   393
+  ],
+  [
+   420,
+   463
+  ]
+ ],
+ "subject_15_front_Repeated_Peeking": [
+  [
+   225,
+   291
+  ],
+  [
+   346,
+   414
+  ]
+ ],
+ "subject_15_front_Using_Smartwatch": [
+  [
+   228,
+   334
+  ]
+ ],
+ "subject_15_side_Repeated_Peeking": [
+  [
+   238,
+   310
+  ],
+  [
+   362,
+   434
+  ]
+ ],
+ "subject_15_side_Using_Smartwatch": [
+  [
+   237,
+   341
+  ],
+  [
+   490,
+   515
+  ]
+ ],
+ "subject_16_front_Repeated_Peeking": [
+  [
+   219,
+   321
+  ],
+  [
+   410,
+   477
+  ]
+ ],
+ "subject_16_front_Using_Smartwatch": [
+  [
+   234,
+   409
+  ]
+ ],
+ "subject_16_side_Repeated_Peeking": [
+  [
+   222,
+   326
+  ],
+  [
+   416,
+   488
+  ]
+ ],
+ "subject_16_side_Using_Smartwatch": [
+  [
+   249,
+   418
+  ]
+ ],
+ "subject_17_front_Repeated_Peeking": [
+  [
+   239,
+   314
+  ],
+  [
+   428,
+   494
+  ]
+ ],
+ "subject_17_front_Using_Smartwatch": [
+  [
+   232,
+   414
+  ]
+ ],
+ "subject_17_side_Repeated_Peeking": [
+  [
+   254,
+   329
+  ],
+  [
+   446,
+   511
+  ]
+ ],
+ "subject_17_side_Using_Smartwatch": [
+  [
+   244,
+   418
+  ]
+ ],
+ "subject_18_front_Repeated_Peeking": [
+  [
+   224,
+   281
+  ],
+  [
+   369,
+   436
+  ]
+ ],
+ "subject_18_front_Using_Smartwatch": [
+  [
+   206,
+   392
+  ]
+ ],
+ "subject_18_side_Repeated_Peeking": [
+  [
+   231,
+   301
+  ],
+  [
+   385,
+   455
+  ]
+ ],
+ "subject_18_side_Using_Smartwatch": [
+  [
+   229,
+   502
+  ]
+ ],
+ "subject_19_front_Repeated_Peeking": [
+  [
+   238,
+   296
+  ],
+  [
+   350,
+   392
+  ]
+ ],
+ "subject_19_front_Using_Smartwatch": [
+  [
+   240,
+   470
+  ]
+ ],
+ "subject_19_side_Repeated_Peeking": [
+  [
+   240,
+   301
+  ],
+  [
+   348,
+   394
+  ]
+ ],
+ "subject_19_side_Using_Smartwatch": [
+  [
+   276,
+   504
+  ]
+ ],
+ "subject_1_front_Repeated_Peeking": [
+  [
+   201,
+   281
+  ],
+  [
+   370,
+   443
+  ]
+ ],
+ "subject_1_front_Using_Smartwatch": [
+  [
+   206,
+   350
+  ]
+ ],
+ "subject_1_side_Repeated_Peeking": [
+  [
+   227,
+   308
+  ],
+  [
+   393,
+   464
+  ]
+ ],
+ "subject_1_side_Using_Smartwatch": [
+  [
+   240,
+   378
+  ]
+ ],
+ "subject_20_front_Repeated_Peeking": [
+  [
+   238,
+   308
+  ],
+  [
+   394,
+   470
+  ]
+ ],
+ "subject_20_front_Using_Smartwatch": [
+  [
+   239,
+   441
+  ]
+ ],
+ "subject_20_side_Repeated_Peeking": [
+  [
+   234,
+   303
+  ],
+  [
+   394,
+   457
+  ]
+ ],
+ "subject_20_side_Using_Smartwatch": [
+  [
+   249,
+   461
+  ]
+ ],
+ "subject_21_front_Repeated_Peeking": [
+  [
+   234,
+   299
+  ],
+  [
+   350,
+   417
+  ]
+ ],
+ "subject_21_front_Using_Smartwatch": [
+  [
+   226,
+   352
+  ]
+ ],
+ "subject_21_side_Repeated_Peeking": [
+  [
+   241,
+   313
+  ],
+  [
+   351,
+   425
+  ]
+ ],
+ "subject_21_side_Using_Smartwatch": [
+  [
+   240,
+   390
+  ]
+ ],
+ "subject_22_front_Repeated_Peeking": [
+  [
+   181,
+   256
+  ],
+  [
+   374,
+   430
+  ]
+ ],
+ "subject_22_front_Using_Smartwatch": [
+  [
+   180,
+   450
+  ]
+ ],
+ "subject_22_side_Repeated_Peeking": [
+  [
+   207,
+   269
+  ],
+  [
+   386,
+   443
+  ]
+ ],
+ "subject_22_side_Using_Smartwatch": [
+  [
+   180,
+   480
+  ]
+ ],
+ "subject_23_front_Repeated_Peeking": [
+  [
+   259,
+   313
+  ],
+  [
+   350,
+   427
+  ],
+  [
+   435,
+   477
+  ]
+ ],
+ "subject_23_front_Using_Smartwatch": [
+  [
+   240,
+   420
+  ]
+ ],
+ "subject_23_side_Repeated_Peeking": [
+  [
+   270,
+   321
+  ],
+  [
+   365,
+   441
+  ],
+  [
+   450,
+   491
+  ]
+ ],
+ "subject_23_side_Using_Smartwatch": [
+  [
+   240,
+   420
+  ]
+ ],
+ "subject_24_front_Repeated_Peeking": [
+  [
+   211,
+   267
+  ],
+  [
+   333,
+   384
+  ]
+ ],
+ "subject_24_front_Using_Smartwatch": [
+  [
+   270,
+   390
+  ]
+ ],
+ "subject_24_side_Repeated_Peeking": [
+  [
+   237,
+   285
+  ],
+  [
+   358,
+   405
+  ]
+ ],
+ "subject_24_side_Using_Smartwatch": [
+  [
+   300,
+   420
+  ]
+ ],
+ "subject_25_front_Repeated_Peeking": [
+  [
+   223,
+   304
+  ],
+  [
+   345,
+   426
+  ]
+ ],
+ "subject_25_front_Using_Smartwatch": [
+  [
+   240,
+   420
+  ]
+ ],
+ "subject_25_side_Repeated_Peeking": [
+  [
+   232,
+   311
+  ],
+  [
+   352,
+   437
+  ]
+ ],
+ "subject_25_side_Using_Smartwatch": [
+  [
+   240,
+   300
+  ],
+  [
+   360,
+   420
+  ]
+ ],
+ "subject_26_front_Repeated_Peeking": [
+  [
+   245,
+   317
+  ],
+  [
+   341,
+   408
+  ]
+ ],
+ "subject_26_front_Using_Smartwatch": [
+  [
+   240,
+   480
+  ]
+ ],
+ "subject_26_side_Repeated_Peeking": [
+  [
+   259,
+   332
+  ],
+  [
+   352,
+   417
+  ]
+ ],
+ "subject_26_side_Using_Smartwatch": [
+  [
+   240,
+   480
+  ]
+ ],
+ "subject_2_front_Repeated_Peeking": [
+  [
+   213,
+   274
+  ],
+  [
+   366,
+   431
+  ]
+ ],
+ "subject_2_front_Using_Smartwatch": [
+  [
+   240,
+   391
+  ]
+ ],
+ "subject_2_side_Repeated_Peeking": [
+  [
+   226,
+   292
+  ],
+  [
+   388,
+   452
+  ]
+ ],
+ "subject_2_side_Using_Smartwatch": [
+  [
+   235,
+   414
+  ]
+ ],
+ "subject_3_front_Repeated_Peeking": [
+  [
+   188,
+   231
+  ],
+  [
+   281,
+   334
+  ],
+  [
+   384,
+   443
+  ]
+ ],
+ "subject_3_front_Using_Smartwatch": [
+  [
+   240,
+   450
+  ]
+ ],
+ "subject_3_side_Repeated_Peeking": [
+  [
+   212,
+   260
+  ],
+  [
+   303,
+   356
+  ],
+  [
+   408,
+   472
+  ]
+ ],
+ "subject_3_side_Using_Smartwatch": [
+  [
+   240,
+   450
+  ]
+ ],
+ "subject_4_front_Repeated_Peeking": [
+  [
+   60,
+   90
+  ],
+  [
+   120,
+   180
+  ],
+  [
+   210,
+   390
+  ],
+  [
+   420,
+   450
+  ]
+ ],
+ "subject_4_front_Using_Smartwatch": [
+  [
+   60,
+   90
+  ],
+  [
+   120,
+   420
+  ]
+ ],
+ "subject_4_side_Repeated_Peeking": [
+  [
+   165,
+   275
+  ],
+  [
+   358,
+   467
+  ]
+ ],
+ "subject_4_side_Using_Smartwatch": [
+  [
+   180,
+   390
+  ]
+ ],
+ "subject_5_front_Repeated_Peeking": [
+  [
+   204,
+   294
+  ],
+  [
+   364,
+   421
+  ]
+ ],
+ "subject_5_front_Using_Smartwatch": [
+  [
+   240,
+   450
+  ]
+ ],
+ "subject_5_side_Repeated_Peeking": [
+  [
+   215,
+   304
+  ],
+  [
+   378,
+   432
+  ]
+ ],
+ "subject_5_side_Using_Smartwatch": [
+  [
+   240,
+   420
+  ]
+ ],
+ "subject_6_front_Repeated_Peeking": [
+  [
+   221,
+   324
+  ],
+  [
+   416,
+   511
+  ]
+ ],
+ "subject_6_front_Using_Smartwatch": [
+  [
+   210,
+   420
+  ]
+ ],
+ "subject_6_side_Repeated_Peeking": [
+  [
+   228,
+   329
+  ],
+  [
+   424,
+   470
+  ]
+ ],
+ "subject_7_front_Repeated_Peeking": [
+  [
+   217,
+   276
+  ],
+  [
+   342,
+   414
+  ],
+  [
+   461,
+   463
+  ]
+ ],
+ "subject_7_side_Repeated_Peeking": [
+  [
+   234,
+   286
+  ],
+  [
+   360,
+   431
+  ]
+ ],
+ "subject_7_side_Using_Smartwatch": [
+  [
+   90,
+   120
+  ],
+  [
+   240,
+   480
+  ]
+ ],
+ "subject_8_front_Repeated_Peeking": [
+  [
+   211,
+   265
+  ],
+  [
+   283,
+   316
+  ],
+  [
+   332,
+   425
+  ]
+ ],
+ "subject_8_front_Using_Smartwatch": [
+  [
+   240,
+   390
+  ]
+ ],
+ "subject_8_side_Repeated_Peeking": [
+  [
+   223,
+   277
+  ],
+  [
+   296,
+   328
+  ],
+  [
+   346,
+   440
+  ]
+ ],
+ "subject_8_side_Using_Smartwatch": [
+  [
+   240,
+   420
+  ]
+ ],
+ "subject_9_front_Repeated_Peeking": [
+  [
+   143,
+   160
+  ],
+  [
+   224,
+   348
+  ],
+  [
+   407,
+   445
+  ],
+  [
+   479,
+   508
+  ]
+ ],
+ "subject_9_front_Using_Smartwatch": [
+  [
+   210,
+   480
+  ]
+ ],
+ "subject_9_side_Repeated_Peeking": [
+  [
+   151,
+   166
+  ],
+  [
+   230,
+   355
+  ],
+  [
+   415,
+   452
+  ],
+  [
+   489,
+   524
+  ]
+ ],
+ "subject_9_side_Using_Smartwatch": [
+  [
+   240,
+   450
+  ]
+ ]
+}

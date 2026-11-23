@@ -10,6 +10,7 @@ import yaml
 from accelerate import Accelerator
 
 from core.config import Config
+from dataset.intervals import load_intervals
 from evaluation.metrics import evaluate_clips
 from training.engine import train_fold
 
@@ -57,8 +58,11 @@ def pending_folds(cfg: Config) -> list[int]:
 
 
 def load_videos(cfg: Config) -> pd.DataFrame:
-    """The train videos table, with each video's action `onset` frame when `data.onsets` is set."""
+    """The train videos table, with each video's action `onset` frame when `data.onsets` is set and its manual
+    cheating `spans` (NaN for videos without) when `data.intervals` is set."""
     videos = pd.read_csv(Path(cfg.paths.cache_dir) / "videos.csv")
+    if cfg.data.intervals:
+        videos["spans"] = videos.video_id.map(load_intervals(cfg.data.intervals))
     if not cfg.data.onsets:
         return videos
     videos = videos.merge(pd.read_csv(cfg.data.onsets), on="video_id", how="left")
